@@ -498,6 +498,51 @@ h1, h2, h3 {
     word-break: break-word;
 }
 
+/* 現場リストPLUS 由来の勤怠/出勤。コメントの一行上に置く。 */
+.entry-item-shift-time {
+    margin-top: 3px;
+    color: #1d4ed8;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.ss-shift-time-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    margin-top: 4px;
+}
+
+.ss-shift-time-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ss-ink);
+    cursor: pointer;
+}
+
+.ss-shift-time-note {
+    flex-basis: 100%;
+    color: var(--ss-muted);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.ss-check-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--ss-ink);
+    cursor: pointer;
+}
+
 .entry-item-status {
     display: inline-flex;
     align-items: center;

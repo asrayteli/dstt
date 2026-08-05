@@ -219,6 +219,16 @@
         <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者(名)</span><input name="site_manager_first" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" required></label>
         <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者ID</span><input name="site_manager_id" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" required></label>
         <label class="text-sm md:col-span-2"><span class="mb-1.5 block font-medium text-slate-700">営業所コード</span><select name="office_code" id="site-office-code" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><option value="">未設定</option></select><span class="mt-1 block text-xs text-slate-500">アクセス権限のある営業所から選択できます。</span></label>
+        <div class="text-sm md:col-span-2" data-shift-times-block="site">
+          <span class="mb-1.5 block font-medium text-slate-700">勤怠時間</span>
+          <div class="space-y-2" data-attendance-rows></div>
+          <div class="mt-2 flex flex-wrap items-center gap-3">
+            <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" data-attendance-add>時間帯を追加</button>
+            <span class="text-xs text-slate-500">中抜け休憩がある場合は時間帯を追加してください（最大6区間）。</span>
+          </div>
+          <input type="hidden" name="attendance_times" value="[]">
+        </div>
+        <label class="text-sm md:col-span-2"><span class="mb-1.5 block font-medium text-slate-700">出勤時間</span><input name="report_time" type="text" inputmode="numeric" placeholder="9:40" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><span class="mt-1 block text-xs text-slate-500">現場に入る時刻を1つだけ登録します。空欄なら未設定です。</span></label>
         <label class="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 md:col-span-2"><span class="font-medium">有効</span><input name="is_active" type="checkbox" checked class="rounded border-slate-300"></label>
       </div>
       <div class="siteplus-modal-actions">
@@ -236,6 +246,17 @@
       <div class="grid gap-4 md:grid-cols-2">
         <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">枝番号</span><input name="site_branch" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="001" required></label>
         <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">CloudShiftオプション</span><select name="cloudshift_option_key" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" required>{% for item in option_items %}<option value="{{ item.key }}" {% if item.key == 'PENDING' %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
+        <div class="text-sm md:col-span-2" data-shift-times-block="branch">
+          <span class="mb-1.5 block font-medium text-slate-700">勤怠時間（枝番号で上書き）</span>
+          <div class="space-y-2" data-attendance-rows></div>
+          <div class="mt-2 flex flex-wrap items-center gap-3">
+            <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" data-attendance-add>時間帯を追加</button>
+            <span class="text-xs text-slate-500">空のままなら親現場の勤怠時間を引き継ぎます。</span>
+          </div>
+          <input type="hidden" name="attendance_times" value="[]">
+        </div>
+        <label class="text-sm md:col-span-2"><span class="mb-1.5 block font-medium text-slate-700">出勤時間（枝番号で上書き）</span><input name="report_time" type="text" inputmode="numeric" placeholder="9:40" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><span class="mt-1 block text-xs text-slate-500">空欄なら親現場の出勤時間を引き継ぎます。</span></label>
+        <div class="text-xs text-slate-500 md:col-span-2" data-branch-inherited-note></div>
         <label class="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 md:col-span-2"><span class="font-medium">有効</span><input name="is_active" type="checkbox" checked class="rounded border-slate-300"></label>
       </div>
       <div class="siteplus-modal-actions">
@@ -357,6 +378,35 @@ const siteForm=$('#site-form'),branchForm=$('#branch-form');
 const esc=(v)=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#39;");
 async function req(url,opt={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});const t=await r.text();const d=t?JSON.parse(t):{};if(!r.ok){const e=new Error(d.error||'処理に失敗しました');e.payload=d;e.status=r.status;throw e}return d}
 const optionLabel=(k)=>((SITEPLUS.optionItems.find((i)=>i.key===k)||{}).label||k);
+// 勤怠/出勤の表示は 09:40 → 9:40 のように時の先頭ゼロだけ落とす（サーバー側の整形と同じ）。
+const shiftTimeDisplay=(v)=>String(v||'').replace(/^0(\d:)/,'$1');
+function describeShiftTimes(values){
+  const ranges=(values&&Array.isArray(values.attendance_times)?values.attendance_times:[])
+    .map((range)=>{
+      const start=shiftTimeDisplay(range&&range.start);
+      const end=shiftTimeDisplay(range&&range.end);
+      return start&&end?`${start}~${end}`:(start||end);
+    })
+    .filter(Boolean);
+  const report=shiftTimeDisplay(values&&values.report_time);
+  return `勤怠：${ranges.length?ranges.join(' / '):'未設定'}、出勤：${report||'未設定'}`;
+}
+// 枝番号は未設定の項目だけ親現場を引き継ぐ（サーバー側 resolve_shift_times と同じ規則）。
+function resolveBranchShiftTimes(site,branch){
+  const siteAttendance=Array.isArray(site&&site.attendance_times)?site.attendance_times:[];
+  const branchAttendance=Array.isArray(branch&&branch.attendance_times)?branch.attendance_times:[];
+  return {
+    attendance_times:branchAttendance.length?branchAttendance:siteAttendance,
+    report_time:String((branch&&branch.report_time)||'')||String((site&&site.report_time)||'')
+  };
+}
+function describeBranchShiftTimes(site,branch){
+  const overrides=[];
+  if(Array.isArray(branch&&branch.attendance_times)&&branch.attendance_times.length) overrides.push('勤怠');
+  if(String((branch&&branch.report_time)||'')) overrides.push('出勤');
+  const text=describeShiftTimes(resolveBranchShiftTimes(site,branch));
+  return overrides.length?`${text}（${overrides.join('・')}を上書き）`:text;
+}
 const formDataObj=(f)=>{const d=Object.fromEntries(new FormData(f).entries());f.querySelectorAll('input[type="checkbox"]').forEach((c)=>d[c.name]=c.checked);return d};
 const openModal=(id)=>{$('#'+id).classList.remove('hidden');$('#'+id).classList.add('flex')}; const closeModal=(id)=>{$('#'+id).classList.add('hidden');$('#'+id).classList.remove('flex')};
 const selectedSite=()=>SITEPLUS.sites.find((i)=>i.id===SITEPLUS.selectedSiteId)||null;
@@ -1518,6 +1568,7 @@ renderList=function(){
               <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">登録 / 更新</div><div class="mt-1 font-medium text-slate-800">${esc(site.site_register)}</div><div class="text-xs text-slate-500">${esc(site.site_updater)}</div></div>
               <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">更新日時</div><div class="mt-1 font-medium text-slate-800">${esc(site.updated_at||'-')}</div></div>
               <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">枝番号</div><div class="mt-1 font-medium text-slate-800">${branches.length}件</div><div class="text-xs text-slate-500">${site.active_branch_count||0}件有効</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3 sm:col-span-2"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">勤怠 / 出勤</div><div class="mt-1 font-medium text-slate-800">${esc(describeShiftTimes(site))}</div><div class="text-xs text-slate-500">枝番号ごとに上書きできます</div></div>
             </div>
           </div>
           <div class="siteplus-card-actions lg:w-[160px]">
@@ -1527,7 +1578,7 @@ renderList=function(){
       </div>
       <div class="px-5 py-4 sm:px-6">
         <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-900">枝番号一覧</h3><span class="text-xs text-slate-500">${branches.length?`${branches.length}件`:'未登録'}</span></div>
-        ${branches.length?`<div class="overflow-hidden rounded-[20px] border border-slate-200"><table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="px-4 py-3">枝番号</th><th class="px-4 py-3">契約コード</th><th class="px-4 py-3">車両番号</th><th class="px-4 py-3">セグメント</th><th class="px-4 py-3">オプション</th><th class="px-4 py-3">登録者</th><th class="px-4 py-3">更新日時</th><th class="px-4 py-3">状態</th><th class="px-4 py-3"></th></tr></thead><tbody>${branches.map((branch)=>`<tr class="border-t border-slate-100"><td class="px-4 py-3 font-medium text-slate-900">${esc(branch.site_branch)}</td><td class="px-4 py-3 text-slate-600">${esc(branch.contract_code||'-')}</td><td class="px-4 py-3 text-slate-600">${esc(branch.vehicle_number||'-')}</td><td class="px-4 py-3">${esc(branch.segment||'未設定')}</td><td class="px-4 py-3">${esc(optionLabel(branch.cloudshift_option_key))}</td><td class="px-4 py-3">${esc(branch.site_register)}</td><td class="px-4 py-3">${esc(branch.updated_at||'-')}</td><td class="px-4 py-3">${branch.is_active?'<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-700">無効</span>'}</td><td class="px-4 py-3 text-right"><div class="flex justify-end gap-2"><button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.editBranch(${branch.id})">編集</button><button type="button" class="siteplus-btn siteplus-btn-muted siteplus-btn-sm" onclick="window.openDedicatedModal(${branch.id})">${branch.dedicated_employee_name?`専従: ${esc(branch.dedicated_employee_name)}`:'専従設定'}</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">この親現場には枝番号がまだありません。</div>'}
+        ${branches.length?`<div class="overflow-hidden rounded-[20px] border border-slate-200"><table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="px-4 py-3">枝番号</th><th class="px-4 py-3">契約コード</th><th class="px-4 py-3">車両番号</th><th class="px-4 py-3">セグメント</th><th class="px-4 py-3">オプション</th><th class="px-4 py-3">勤怠 / 出勤</th><th class="px-4 py-3">登録者</th><th class="px-4 py-3">更新日時</th><th class="px-4 py-3">状態</th><th class="px-4 py-3"></th></tr></thead><tbody>${branches.map((branch)=>`<tr class="border-t border-slate-100"><td class="px-4 py-3 font-medium text-slate-900">${esc(branch.site_branch)}</td><td class="px-4 py-3 text-slate-600">${esc(branch.contract_code||'-')}</td><td class="px-4 py-3 text-slate-600">${esc(branch.vehicle_number||'-')}</td><td class="px-4 py-3">${esc(branch.segment||'未設定')}</td><td class="px-4 py-3">${esc(optionLabel(branch.cloudshift_option_key))}</td><td class="px-4 py-3 text-slate-600">${esc(describeBranchShiftTimes(site,branch))}</td><td class="px-4 py-3">${esc(branch.site_register)}</td><td class="px-4 py-3">${esc(branch.updated_at||'-')}</td><td class="px-4 py-3">${branch.is_active?'<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-700">無効</span>'}</td><td class="px-4 py-3 text-right"><div class="flex justify-end gap-2"><button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.editBranch(${branch.id})">編集</button><button type="button" class="siteplus-btn siteplus-btn-muted siteplus-btn-sm" onclick="window.openDedicatedModal(${branch.id})">${branch.dedicated_employee_name?`専従: ${esc(branch.dedicated_employee_name)}`:'専従設定'}</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">この親現場には枝番号がまだありません。</div>'}
       </div>
     </article>`;
   }).join('');
@@ -1559,5 +1610,174 @@ if(branchCreateButton){
 }
 
 renderList();
+</script>
+<script>
+// 勤怠時間（複数区間）と出勤時間の入力UI。
+// 勤怠時間は行を足し引きできるので FormData には載せず、hidden 項目へ JSON で同期する。
+const SHIFT_TIME_MAX_RANGES=6;
+
+function shiftTimesBlock(form){return form?form.querySelector('[data-shift-times-block]'):null}
+
+function normalizeShiftTimeInput(value){
+  const text=String(value??'').trim()
+    .replace(/[０-９]/g,(c)=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
+    .replace(/[：]/g,':')
+    .replace(/\s+/g,'');
+  if(!text) return '';
+  let hour=null,minute=null;
+  let m=text.match(/^(\d{1,2}):(\d{2})$/);
+  if(m){hour=Number(m[1]);minute=Number(m[2])}
+  else if((m=text.match(/^(\d{1,2})時(?:(\d{1,2})分?)?$/))){hour=Number(m[1]);minute=Number(m[2]||0)}
+  else if((m=text.match(/^(\d{1,2})(\d{2})$/))){hour=Number(m[1]);minute=Number(m[2])}
+  else if(/^\d{1,2}$/.test(text)){hour=Number(text);minute=0}
+  if(hour===null) return '';
+  if(hour===24&&minute===0) return '24:00';
+  if(hour<0||hour>23||minute<0||minute>59) return '';
+  return `${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`;
+}
+
+function readAttendanceRows(block){
+  if(!block) return [];
+  return Array.from(block.querySelectorAll('[data-attendance-row]')).map((row)=>({
+    start:String(row.querySelector('[data-attendance-start]')?.value||'').trim(),
+    end:String(row.querySelector('[data-attendance-end]')?.value||'').trim()
+  }));
+}
+
+function syncAttendanceHidden(block){
+  if(!block) return;
+  const hidden=block.querySelector('input[name="attendance_times"]');
+  if(!hidden) return;
+  // 解釈できない入力はそのまま送り、サーバー側の検証でエラーを返す（黙って捨てない）。
+  const rows=readAttendanceRows(block)
+    .map((row)=>({
+      start:normalizeShiftTimeInput(row.start)||row.start,
+      end:normalizeShiftTimeInput(row.end)||row.end
+    }))
+    .filter((row)=>row.start||row.end);
+  hidden.value=JSON.stringify(rows);
+}
+
+function attendanceRowMarkup(range){
+  const start=esc(range&&range.start?range.start:'');
+  const end=esc(range&&range.end?range.end:'');
+  return `<div class="flex items-center gap-2" data-attendance-row>
+    <input type="text" inputmode="numeric" placeholder="10:00" value="${start}" data-attendance-start class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-2.5">
+    <span class="text-slate-500">~</span>
+    <input type="text" inputmode="numeric" placeholder="19:00" value="${end}" data-attendance-end class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-2.5">
+    <button type="button" class="siteplus-btn siteplus-btn-muted siteplus-btn-sm shrink-0" data-attendance-remove>削除</button>
+  </div>`;
+}
+
+function renderAttendanceRows(form,ranges){
+  const block=shiftTimesBlock(form);
+  if(!block) return;
+  const host=block.querySelector('[data-attendance-rows]');
+  if(!host) return;
+  const items=Array.isArray(ranges)?ranges.slice(0,SHIFT_TIME_MAX_RANGES):[];
+  host.innerHTML=items.length
+    ?items.map((range)=>attendanceRowMarkup(range)).join('')
+    :'<p class="text-xs text-slate-500" data-attendance-empty>勤怠時間は未設定です。「時間帯を追加」から登録してください。</p>';
+  syncAttendanceHidden(block);
+}
+
+function applyShiftTimesToForm(form,values){
+  if(!form) return;
+  renderAttendanceRows(form,(values&&values.attendance_times)||[]);
+  const reportInput=form.querySelector('[name="report_time"]');
+  if(reportInput) reportInput.value=(values&&values.report_time)||'';
+}
+
+function bindShiftTimeControls(form){
+  const block=shiftTimesBlock(form);
+  if(!block||block.dataset.shiftTimesBound==='1') return;
+  block.dataset.shiftTimesBound='1';
+  block.addEventListener('click',(ev)=>{
+    const addButton=ev.target.closest('[data-attendance-add]');
+    if(addButton){
+      ev.preventDefault();
+      const ranges=readAttendanceRows(block);
+      if(ranges.length>=SHIFT_TIME_MAX_RANGES){
+        window.alert(`勤怠時間は${SHIFT_TIME_MAX_RANGES}区間まで登録できます。`);
+        return;
+      }
+      renderAttendanceRows(form,ranges.concat([{start:'',end:''}]));
+      block.querySelector('[data-attendance-row]:last-of-type [data-attendance-start]')?.focus();
+      return;
+    }
+    const removeButton=ev.target.closest('[data-attendance-remove]');
+    if(removeButton){
+      ev.preventDefault();
+      const row=removeButton.closest('[data-attendance-row]');
+      const rows=Array.from(block.querySelectorAll('[data-attendance-row]'));
+      const index=rows.indexOf(row);
+      const ranges=readAttendanceRows(block).filter((_,i)=>i!==index);
+      renderAttendanceRows(form,ranges);
+    }
+  });
+  block.addEventListener('input',()=>syncAttendanceHidden(block));
+  // 入力欄から離れた時点で 1000 → 10:00 のように整形して見せる。
+  block.addEventListener('focusout',(ev)=>{
+    const field=ev.target.closest('[data-attendance-start],[data-attendance-end]');
+    if(field){
+      const normalized=normalizeShiftTimeInput(field.value);
+      if(normalized) field.value=normalized;
+    }
+    syncAttendanceHidden(block);
+  });
+  const reportInput=form.querySelector('[name="report_time"]');
+  if(reportInput){
+    reportInput.addEventListener('blur',()=>{
+      const normalized=normalizeShiftTimeInput(reportInput.value);
+      if(normalized) reportInput.value=normalized;
+    });
+  }
+  // 送信直前にも同期しておく（IME 確定直後の submit で取りこぼさないため）。
+  form.addEventListener('submit',()=>syncAttendanceHidden(block),true);
+}
+
+bindShiftTimeControls(siteForm);
+bindShiftTimeControls(branchForm);
+renderAttendanceRows(siteForm,[]);
+renderAttendanceRows(branchForm,[]);
+
+function setBranchInheritedNote(site){
+  const note=branchForm.querySelector('[data-branch-inherited-note]');
+  if(note) note.textContent=site?`親現場の設定: ${describeShiftTimes(site)}`:'';
+}
+
+// 既存の初期化/読み込み処理へ勤怠・出勤の同期を足し込む（元の挙動はそのまま呼ぶ）。
+const baseResetSiteForm=resetSiteForm;
+resetSiteForm=function(){
+  baseResetSiteForm();
+  applyShiftTimesToForm(siteForm,{});
+};
+
+const baseResetBranchForm=resetBranchForm;
+resetBranchForm=function(){
+  baseResetBranchForm();
+  applyShiftTimesToForm(branchForm,{});
+  setBranchInheritedNote(null);
+};
+
+const basePopulateSiteFormForEditor=populateSiteFormForEditor;
+populateSiteFormForEditor=function(site){
+  basePopulateSiteFormForEditor(site);
+  applyShiftTimesToForm(siteForm,site);
+};
+
+const basePopulateBranchFormForCreate=populateBranchFormForCreate;
+populateBranchFormForCreate=function(site){
+  basePopulateBranchFormForCreate(site);
+  applyShiftTimesToForm(branchForm,{});
+  setBranchInheritedNote(site);
+};
+
+const basePopulateBranchFormForEdit=populateBranchFormForEdit;
+populateBranchFormForEdit=function(ctx){
+  basePopulateBranchFormForEdit(ctx);
+  applyShiftTimesToForm(branchForm,ctx.branch);
+  setBranchInheritedNote(ctx.site);
+};
 </script>
 {% endblock %}

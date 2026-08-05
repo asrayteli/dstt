@@ -66,6 +66,7 @@ from app.models import (
     User,
     db,
 )
+from app.site_shift_times import resolve_shift_times
 
 try:
     from .shiftersync_format import (
@@ -74,6 +75,7 @@ try:
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         entry_second_option,
+        entry_shift_time_label,
         normalize_entries_for_month,
         normalize_large_entries_for_month,
         normalize_entry,
@@ -92,6 +94,7 @@ except ImportError:
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         entry_second_option,
+        entry_shift_time_label,
         normalize_entries_for_month,
         normalize_large_entries_for_month,
         normalize_entry,
@@ -1741,6 +1744,65 @@ def _entry_value_uses_site_link(project: dict[str, Any] | None, entry: dict[str,
     return mode == "master" and _master_target_type_for_project(project) == "person"
 
 
+def _site_shift_times_from_master(site_row_id: Any, site_branch_row_id: Any) -> dict[str, Any] | None:
+    """現場リストPLUSの勤怠時間/出勤時間を引く（親現場を既定、枝番号で上書き）。
+
+    現場が見つからない場合は ``None`` を返し、呼び出し側はエントリ側のスナップショット
+    をそのまま使う（現場を削除しても既存シフトの表示が空にならないようにするため）。
+    """
+    normalized_site_row_id = _coerce_site_row_id(site_row_id)
+    if not normalized_site_row_id:
+        return None
+    if "sqlalchemy" not in current_app.extensions:
+        return None
+
+    normalized_branch_row_id = _coerce_site_row_id(site_branch_row_id)
+    cache = _request_scoped_cache("_cloudshift_site_shift_times_cache")
+    cache_key = (normalized_site_row_id, normalized_branch_row_id)
+    if cache is not None and cache_key in cache:
+        return _copy_shift_times(cache[cache_key])
+
+    try:
+        site = db.session.get(Site, int(normalized_site_row_id))
+        branch = (
+            db.session.get(SiteBranch, int(normalized_branch_row_id))
+            if normalized_branch_row_id
+            else None
+        )
+    except Exception:
+        site, branch = None, None
+    # 枝番号が別現場のものだった場合は無視して親現場の値だけを使う。
+    if branch is not None and int(branch.site_row_id or 0) != int(normalized_site_row_id):
+        branch = None
+
+    resolved = resolve_shift_times(site, branch) if site is not None else None
+    if cache is not None:
+        cache[cache_key] = _copy_shift_times(resolved)
+    return resolved
+
+
+def _copy_shift_times(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """区間リストごと複製する（リクエストキャッシュと呼び出し側で共有しないため）。"""
+    if value is None:
+        return None
+    return {
+        "attendance_times": [dict(item) for item in value.get("attendance_times") or []],
+        "report_time": str(value.get("report_time") or ""),
+    }
+
+
+def _entry_with_latest_shift_times(entry: dict[str, Any]) -> dict[str, Any]:
+    """勤怠時間/出勤時間を現場マスタの最新値へ寄せる（引けない場合は保存値を維持）。"""
+    if not entry.get("show_attendance_time") and not entry.get("show_report_time"):
+        return entry
+    resolved = _site_shift_times_from_master(entry.get("site_row_id"), entry.get("site_branch_row_id"))
+    if resolved is None:
+        return entry
+    entry["attendance_times"] = resolved["attendance_times"]
+    entry["report_time"] = resolved["report_time"]
+    return entry
+
+
 def _entry_with_latest_site_link(entry: dict[str, Any], project: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(entry, dict):
         return entry
@@ -1760,7 +1822,7 @@ def _entry_with_latest_site_link(entry: dict[str, Any], project: dict[str, Any] 
     if latest["site_name"] and _entry_value_uses_site_link(project, updated):
         option_key, _ = _entry_option_and_name(updated)
         updated["value"] = _format_entry_value(option_key, latest["site_name"])
-    return updated
+    return _entry_with_latest_shift_times(updated)
 
 
 def _entries_with_latest_site_links(entries_per_day: Any, project: dict[str, Any] | None) -> Any:
@@ -9501,6 +9563,7 @@ def _calendar_day_map(month_data: dict[str, Any]) -> dict[int, list[dict[str, st
         int(day): [
             {
                 "title": entry_display_text(entry),
+                "shift_time": entry_shift_time_label(entry),
                 "comment": str(entry.get("comment", "")),
             }
             for entry in entries

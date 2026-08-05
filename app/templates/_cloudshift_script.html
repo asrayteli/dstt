@@ -313,14 +313,29 @@
       const autoBranchFields = currentProject() && currentProject().mode === 'scene' && !explicitBranchRowId
         ? autoBranchFieldsForOption(optionKey || null)
         : { site_branch_row_id: explicitBranchRowId, site_branch: explicitBranch };
+      const isPersonProject = !!(currentProject() && currentProject().mode === 'person');
+      const nameDataset = refs.nameInput && refs.nameInput.dataset ? refs.nameInput.dataset : {};
+      const selectedSiteName = String(nameDataset.selectedSiteName || '').trim();
+      // 個人シフトは現場リンクを持たせる（勤怠/出勤の解決にも使う）。名前を手入力で
+      // 書き換えた場合は候補選択が外れたとみなし、リンクを付けない。
+      const siteFields = isPersonProject && selectedSiteName && selectedSiteName === name
+        ? {
+          site_row_id: String(nameDataset.siteRowId || '').trim(),
+          site_id: String(nameDataset.siteId || '').trim(),
+          site_name: selectedSiteName
+        }
+        : { site_row_id: '', site_id: '', site_name: '' };
       return {
         id: makeEntryId(),
         value: formatEntryValue(optionKey || null, name),
         second_option: secondOption,
         comment,
         employee_number: employeeNumber,
+        ...siteFields,
         site_branch_row_id: autoBranchFields.site_branch_row_id,
-        site_branch: autoBranchFields.site_branch
+        site_branch: autoBranchFields.site_branch,
+        show_attendance_time: !!(refs.showAttendanceInput && refs.showAttendanceInput.checked),
+        show_report_time: !!(refs.showReportInput && refs.showReportInput.checked)
       };
     }
 
@@ -331,8 +346,15 @@
         second_option: normalizeSecondOptionKey(entry && (entry.second_option || entry.secondOption || '')),
         comment: String(entry && entry.comment ? entry.comment : '').trim(),
         employee_number: String(entry && entry.employee_number ? entry.employee_number : '').trim(),
+        site_row_id: String(entry && (entry.site_row_id || entry.siteRowId || '') ? (entry.site_row_id || entry.siteRowId) : '').trim(),
+        site_id: String(entry && (entry.site_id || entry.siteId || '') ? (entry.site_id || entry.siteId) : '').trim(),
+        site_name: String(entry && (entry.site_name || entry.siteName || '') ? (entry.site_name || entry.siteName) : '').trim(),
         site_branch_row_id: normalizeSiteBranchRowId(entry && (entry.site_branch_row_id || entry.siteBranchRowId || '')),
-        site_branch: String(entry && (entry.site_branch || entry.siteBranch || '') ? (entry.site_branch || entry.siteBranch || '') : '').trim()
+        site_branch: String(entry && (entry.site_branch || entry.siteBranch || '') ? (entry.site_branch || entry.siteBranch || '') : '').trim(),
+        show_attendance_time: !!(entry && (entry.show_attendance_time || entry.showAttendanceTime)),
+        show_report_time: !!(entry && (entry.show_report_time || entry.showReportTime)),
+        attendance_times: Array.isArray(entry && entry.attendance_times) ? entry.attendance_times.slice() : [],
+        report_time: String(entry && entry.report_time ? entry.report_time : '').trim()
       };
     }
 
@@ -2023,6 +2045,7 @@
       const refs = bulkFieldRefs(form);
       if (!refs.nameInput) return;
       refs.nameInput.removeAttribute('data-site-id');
+      refs.nameInput.removeAttribute('data-site-row-id');
       refs.nameInput.removeAttribute('data-selected-site-name');
       if (refs.note) {
         refs.note.textContent = '';
@@ -2057,6 +2080,7 @@
       refs.nameInput.value = siteName;
       refs.nameInput.dataset.selectedSiteName = siteName;
       refs.nameInput.dataset.siteId = siteId;
+      refs.nameInput.dataset.siteRowId = String(candidate.site_row_id || candidate.id || '').trim();
       if (refs.note) {
         refs.note.textContent = siteId ? `契約番号: ${siteId}` : '';
         refs.note.classList.toggle('cloud-hidden', !siteId);
@@ -7089,7 +7113,9 @@
           optionSelect: form.querySelector('[name="bulk_option"]'),
           secondOptionSelect: form.querySelector('[name="bulk_second_option"]'),
           employeeInput: form.querySelector('[name="bulk_employee_number"]'),
-          branchSelect: form.querySelector('[name="bulk_site_branch_row_id"]')
+          branchSelect: form.querySelector('[name="bulk_site_branch_row_id"]'),
+          showAttendanceInput: form.querySelector('[name="bulk_show_attendance_time"]'),
+          showReportInput: form.querySelector('[name="bulk_show_report_time"]')
         });
         if (!templateEntry) {
           showFlash('追加内容を入力してください', 'error');
@@ -7206,6 +7232,12 @@
                 </select>
                 <div class="cloud-inline-note" data-bulk-branch-note>必要に応じて枝番号を選択してください</div>
               </label>
+              <div class="cloud-field cloud-field-wide${project.mode === 'person' ? '' : ' cloud-hidden'}" data-bulk-shift-time-field>
+                <span>現場の時間表示</span>
+                <label class="cloud-check-row"><input type="checkbox" name="bulk_show_attendance_time"><span>勤怠時間を表示</span></label>
+                <label class="cloud-check-row"><input type="checkbox" name="bulk_show_report_time"><span>出勤時間を表示</span></label>
+                <div class="cloud-inline-note">現場リストPLUSに登録された勤怠時間・出勤時間をシフト対象者へ表示します</div>
+              </div>
               <label class="cloud-field cloud-field-wide">
                 <span>コメント</span>
                 <textarea name="bulk_comment" class="cloud-input" rows="3"></textarea>

@@ -57,6 +57,12 @@ const ShifterSync = (function() {
   const siteNameRowPrefix = '#site_name';
   const siteBranchRowIdRowPrefix = '#site_branch_row_id';
   const siteBranchRowPrefix = '#site_branch';
+  const showAttendanceTimeRowPrefix = '#show_attendance_time';
+  const showReportTimeRowPrefix = '#show_report_time';
+  const attendanceTimesRowPrefix = '#attendance_times';
+  const reportTimeRowPrefix = '#report_time';
+  // 勤怠時間は中抜け休憩を想定して複数区間を持てる（サーバー側と同じ上限）。
+  const shiftTimeMaxRanges = 6;
   const shiftSyncSourceTypes = ['scene_shift', 'person_shift', 'master_shift', 'substitute_shift', 'substitute_request'];
   const substituteMetadataRows = [
     ['#substitute_request_type', 'substitute_request_type'],
@@ -201,6 +207,107 @@ const ShifterSync = (function() {
       return '';
     }
     return parseInt(text, 10) > 0 ? text : '';
+  }
+
+  function normalizeShiftTimeFlag(value) {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    return ['1', 'true', 'yes', 'on'].includes(String(value == null ? '' : value).trim().toLowerCase());
+  }
+
+  // 現場リストPLUS 由来の時刻。保持は HH:MM、表示だけ時の先頭ゼロを落とす（サーバー側と同じ規則）。
+  function normalizeShiftTimeText(value) {
+    const text = String(value == null ? '' : value)
+      .trim()
+      .replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
+      .replace(/[：]/g, ':')
+      .replace(/\s+/g, '');
+    if (!text) {
+      return '';
+    }
+    let hour = null;
+    let minute = 0;
+    let matched = text.match(/^(\d{1,2}):(\d{2})$/);
+    if (matched) {
+      hour = Number(matched[1]);
+      minute = Number(matched[2]);
+    } else if ((matched = text.match(/^(\d{1,2})時(?:(\d{1,2})分?)?$/))) {
+      hour = Number(matched[1]);
+      minute = Number(matched[2] || 0);
+    } else if ((matched = text.match(/^(\d{1,2})(\d{2})$/))) {
+      hour = Number(matched[1]);
+      minute = Number(matched[2]);
+    } else if (/^\d{1,2}$/.test(text)) {
+      hour = Number(text);
+    }
+    if (hour === null) {
+      return '';
+    }
+    if (hour === 24 && minute === 0) {
+      return '24:00';
+    }
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      return '';
+    }
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
+
+  function normalizeAttendanceTimes(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .map((range) => ({
+        start: normalizeShiftTimeText(range && range.start),
+        end: normalizeShiftTimeText(range && range.end)
+      }))
+      .filter((range) => range.start || range.end)
+      .slice(0, shiftTimeMaxRanges);
+  }
+
+  function shiftTimeDisplay(value) {
+    return String(value || '').replace(/^0(\d:)/, '$1');
+  }
+
+  // CSV の1セル表現（サーバー側 _serialize_attendance_times_cell と対）。
+  function formatAttendanceTimesForCsv(ranges) {
+    return normalizeAttendanceTimes(ranges)
+      .filter((range) => range.start && range.end)
+      .map((range) => `${range.start}~${range.end}`)
+      .join(' / ');
+  }
+
+  function formatAttendanceTimes(ranges) {
+    return normalizeAttendanceTimes(ranges)
+      .map((range) => {
+        const start = shiftTimeDisplay(range.start);
+        const end = shiftTimeDisplay(range.end);
+        return start && end ? `${start}~${end}` : (start || end);
+      })
+      .filter(Boolean)
+      .join(' / ');
+  }
+
+  // 「勤怠：10:00~19:00、出勤：9:40」の1行。表示OFF・値なしの分は落とす。
+  function entryShiftTimeLabel(entry) {
+    if (!entry) {
+      return '';
+    }
+    const segments = [];
+    if (entry.show_attendance_time) {
+      const attendance = formatAttendanceTimes(entry.attendance_times);
+      if (attendance) {
+        segments.push(`勤怠：${attendance}`);
+      }
+    }
+    if (entry.show_report_time) {
+      const report = shiftTimeDisplay(normalizeShiftTimeText(entry.report_time));
+      if (report) {
+        segments.push(`出勤：${report}`);
+      }
+    }
+    return segments.join('、');
   }
 
   function normalizeSiteBranch(branch) {
@@ -374,6 +481,10 @@ const ShifterSync = (function() {
         site_name: '',
         site_branch_row_id: '',
         site_branch: '',
+        show_attendance_time: false,
+        show_report_time: false,
+        attendance_times: [],
+        report_time: '',
         sync_source_type: '',
         sync_source_project_id: '',
         sync_source_project_title: '',
@@ -422,6 +533,10 @@ const ShifterSync = (function() {
       site_name: String(entry.site_name || entry.siteName || '').trim(),
       site_branch_row_id: normalizeSiteBranchRowId(entry.site_branch_row_id || entry.siteBranchRowId || ''),
       site_branch: String(entry.site_branch || entry.siteBranch || '').trim(),
+      show_attendance_time: normalizeShiftTimeFlag(entry.show_attendance_time !== undefined ? entry.show_attendance_time : entry.showAttendanceTime),
+      show_report_time: normalizeShiftTimeFlag(entry.show_report_time !== undefined ? entry.show_report_time : entry.showReportTime),
+      attendance_times: normalizeAttendanceTimes(entry.attendance_times || entry.attendanceTimes),
+      report_time: normalizeShiftTimeText(entry.report_time || entry.reportTime),
       sync_source_type: String(entry.sync_source_type || entry.syncSourceType || '').trim(),
       sync_source_project_id: String(entry.sync_source_project_id || entry.syncSourceProjectId || '').trim(),
       sync_source_project_title: String(entry.sync_source_project_title || entry.syncSourceProjectTitle || '').trim(),
@@ -471,6 +586,10 @@ const ShifterSync = (function() {
       site_name: normalized.site_name,
       site_branch_row_id: normalized.site_branch_row_id,
       site_branch: normalized.site_branch,
+      show_attendance_time: normalized.show_attendance_time === true,
+      show_report_time: normalized.show_report_time === true,
+      attendance_times: normalized.attendance_times.map((range) => ({ start: range.start, end: range.end })),
+      report_time: normalized.report_time,
       sync_source_type: normalized.sync_source_type,
       sync_source_project_id: normalized.sync_source_project_id,
       sync_source_project_title: normalized.sync_source_project_title,
@@ -1394,6 +1513,7 @@ const ShifterSync = (function() {
       return {
         title: '',
         title_tone: '',
+        shift_time_label: '',
         comment: '',
         employee_number: '',
         branch_label: '',
@@ -1465,6 +1585,7 @@ const ShifterSync = (function() {
     return {
       title: branchState.site_branch ? `${displayTitle} / 枝${branchState.site_branch}` : displayTitle,
       title_tone: titleTone,
+      shift_time_label: entryShiftTimeLabel(normalized),
       comment: normalized.comment || '',
       employee_number: normalized.employee_number || '',
       branch_label: branchState.label,
@@ -1477,6 +1598,62 @@ const ShifterSync = (function() {
       sync_source_tone: syncSourceTone,
       second_option_label: secondOptionLabel
     };
+  }
+
+  // 現場に紐づく勤怠/出勤を扱えるのは、エントリが現場を指す個人シフトだけ。
+  function isShiftTimeToggleAvailable() {
+    return isPersonMode();
+  }
+
+  function buildShiftTimeToggleRow(day, values) {
+    const dayKey = String(day == null ? '' : day);
+    const showAttendance = !!(values && values.show_attendance_time);
+    const showReport = !!(values && values.show_report_time);
+    const row = $('<div>').addClass('ss-shift-time-toggles');
+    const makeToggle = (className, label, checked) => $('<label>')
+      .addClass('ss-shift-time-toggle')
+      .append(
+        $('<input>')
+          .attr('type', 'checkbox')
+          .addClass(className)
+          .attr('data-day', dayKey)
+          .prop('checked', checked),
+        $('<span>').text(label)
+      );
+    row.append(
+      makeToggle('entry-show-attendance-time', '勤怠時間を表示', showAttendance),
+      makeToggle('entry-show-report-time', '出勤時間を表示', showReport)
+    );
+    row.append(
+      $('<div>')
+        .addClass('ss-shift-time-note')
+        .text('現場リストPLUSに登録された時間をシフト対象者に表示します。')
+    );
+    return row;
+  }
+
+  // チェックを入れたときに何が出るのかを、モーダル上でそのまま見せる。
+  function entryShiftTimeSourceNote(entry) {
+    const attendance = formatAttendanceTimes(entry && entry.attendance_times);
+    const report = shiftTimeDisplay(normalizeShiftTimeText(entry && entry.report_time));
+    if (!attendance && !report) {
+      return 'この現場には勤怠時間・出勤時間が登録されていません。現場リストPLUSで登録してください。';
+    }
+    return `現場リストPLUSの登録内容: 勤怠 ${attendance || '未設定'} / 出勤 ${report || '未設定'}`;
+  }
+
+  function shiftTimeToggleValuesForDay(day) {
+    const dayKey = String(day || '');
+    return {
+      show_attendance_time: $(`.entry-show-attendance-time[data-day='${dayKey}']`).prop('checked') === true,
+      show_report_time: $(`.entry-show-report-time[data-day='${dayKey}']`).prop('checked') === true
+    };
+  }
+
+  function resetShiftTimeTogglesForDay(day) {
+    const dayKey = String(day || '');
+    $(`.entry-show-attendance-time[data-day='${dayKey}']`).prop('checked', false);
+    $(`.entry-show-report-time[data-day='${dayKey}']`).prop('checked', false);
   }
 
   function hasPendingLeaveChangeRequest(entry) {
@@ -1711,6 +1888,10 @@ const ShifterSync = (function() {
               hasPendingLeaveChangeRequest(entry)
                 ? $('<div>').addClass('entry-item-status is-warning').text('変更申請中')
                 : null,
+              // 勤怠/出勤はコメントの一行上に出す（カレンダー出力と同じ並び）。
+              parts.shift_time_label
+                ? $('<div>').addClass('entry-item-shift-time').text(parts.shift_time_label)
+                : null,
               $('<div>').addClass(`entry-item-comment${parts.comment ? '' : ' is-empty'}`).text(parts.comment ? getCommentPreview(parts.comment) : '\u30b3\u30e1\u30f3\u30c8\u306a\u3057')
             )
         );
@@ -1854,6 +2035,9 @@ const ShifterSync = (function() {
       .attr('data-search-kind', 'day')
       .attr('data-day', day);
 
+    // 個人シフトのみ: 現場リストPLUS の勤怠時間/出勤時間をシフト対象者に見せるかを選ぶ。
+    const shiftTimeToggles = isShiftTimeToggleAvailable() ? buildShiftTimeToggleRow(day) : null;
+
     const optionBtn = $('<button>')
       .attr('type', 'button')
       .addClass('option-select-btn')
@@ -1885,7 +2069,11 @@ const ShifterSync = (function() {
     if (masterSideInput) {
       inputGroup.append(masterSideInput);
     }
-    inputGroup.append(selectionNote, candidatePanel, commentInput, controlsGrid);
+    inputGroup.append(selectionNote, candidatePanel);
+    if (shiftTimeToggles) {
+      inputGroup.append(shiftTimeToggles);
+    }
+    inputGroup.append(commentInput, controlsGrid);
     dayBox.append(inputGroup);
     return dayBox;
   }
@@ -2503,6 +2691,7 @@ const ShifterSync = (function() {
       site_name: siteNameForEntry,
       site_branch_row_id: autoBranchFields.site_branch_row_id,
       site_branch: autoBranchFields.site_branch,
+      ...(isShiftTimeToggleAvailable() ? shiftTimeToggleValuesForDay(dayKey) : {}),
       ...substitutePayload
     });
     if (!entry) {
@@ -2521,6 +2710,7 @@ const ShifterSync = (function() {
       clearSiteSelectionForInput(masterSideInput);
     }
     commentInput.val('');
+    resetShiftTimeTogglesForDay(dayKey);
     clearEmployeeSelectionForInput(nameInput);
     clearSiteSelectionForInput(nameInput);
     clearSelectedOptionsForDay(dayKey);
@@ -2869,6 +3059,12 @@ const ShifterSync = (function() {
                 </div>
               ` : ''}
             </div>
+            ${parts.shift_time_label ? `
+              <div class="ss-detail-comment-block">
+                <div class="ss-detail-label">\u73fe\u5834\u306e\u6642\u9593</div>
+                <div class="ss-detail-comment">${escapeHtml(parts.shift_time_label)}</div>
+              </div>
+            ` : ''}
             <div class="ss-detail-comment-block">
               <div class="ss-detail-label">\u30b3\u30e1\u30f3\u30c8</div>
               <div class="ss-detail-comment">${parts.comment ? escapeHtml(parts.comment) : '<span class="ss-detail-empty-text">\u30b3\u30e1\u30f3\u30c8\u306a\u3057</span>'}</div>
@@ -2985,6 +3181,12 @@ const ShifterSync = (function() {
             <div class="ss-detail-label">\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3</div>
             <div class="ss-detail-static">${escapeHtml(entry.second_option ? (secondOptionMappings[entry.second_option] || entry.second_option) : '\u306a\u3057')}</div>
           </div>
+          ${entryShiftTimeLabel(entry) ? `
+            <div class="ss-detail-field">
+              <div class="ss-detail-label">\u73fe\u5834\u306e\u6642\u9593</div>
+              <div class="ss-detail-static">${escapeHtml(entryShiftTimeLabel(entry))}</div>
+            </div>
+          ` : ''}
           <div class="ss-detail-field">
             <div class="ss-detail-label">\u30b3\u30e1\u30f3\u30c8</div>
             <div class="ss-detail-static">${entry.comment ? escapeHtml(entry.comment) : '<span class="ss-detail-empty-text">\u30b3\u30e1\u30f3\u30c8\u306a\u3057</span>'}</div>
@@ -3171,6 +3373,20 @@ const ShifterSync = (function() {
               <span>解決済みとして人・現場シフトへ反映</span>
             </label>
           </label>
+        ` : ''}
+        ${isShiftTimeToggleAvailable() ? `
+          <div class="ss-detail-field">
+            <span class="ss-detail-label">\u73fe\u5834\u306e\u6642\u9593\u8868\u793a</span>
+            <label class="ss-check-row">
+              <input id="ss-entry-modal-show-attendance-time" type="checkbox" ${entry.show_attendance_time ? 'checked' : ''}>
+              <span>\u52e4\u6020\u6642\u9593\u3092\u8868\u793a</span>
+            </label>
+            <label class="ss-check-row">
+              <input id="ss-entry-modal-show-report-time" type="checkbox" ${entry.show_report_time ? 'checked' : ''}>
+              <span>\u51fa\u52e4\u6642\u9593\u3092\u8868\u793a</span>
+            </label>
+            <div class="ss-detail-empty-text">${escapeHtml(entryShiftTimeSourceNote(entry))}</div>
+          </div>
         ` : ''}
         <div class="ss-detail-field">
           <label class="ss-detail-label" for="ss-entry-modal-comment">\u30b3\u30e1\u30f3\u30c8</label>
@@ -3365,6 +3581,15 @@ const ShifterSync = (function() {
         site_name: siteNameForSave,
         site_branch_row_id: siteBranchRowId,
         site_branch: siteBranch,
+        // 時刻そのものはサーバー側が現場マスタから解決するので、ここではON/OFFと直近値だけ引き継ぐ。
+        show_attendance_time: isShiftTimeToggleAvailable()
+          ? $('#ss-entry-modal-show-attendance-time').prop('checked') === true
+          : entry.show_attendance_time === true,
+        show_report_time: isShiftTimeToggleAvailable()
+          ? $('#ss-entry-modal-show-report-time').prop('checked') === true
+          : entry.show_report_time === true,
+        attendance_times: entry.attendance_times,
+        report_time: entry.report_time,
         ...substitutePayloadForSave,
         substitute_requester_user_id: existingEntry.substitute_requester_user_id || '',
         substitute_requester_name: existingEntry.substitute_requester_name || '',
@@ -3502,6 +3727,7 @@ const ShifterSync = (function() {
     const siteNameRows = [];
     const siteBranchRowIdRows = [];
     const siteBranchRows = [];
+    const shiftTimeRows = [];
     const substituteRows = [];
     Object.keys(state.entriesPerDay)
       .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
@@ -3538,6 +3764,18 @@ const ShifterSync = (function() {
           if (entry.site_branch) {
             siteBranchRows.push([siteBranchRowPrefix, day, index, entry.site_branch]);
           }
+          if (entry.show_attendance_time) {
+            shiftTimeRows.push([showAttendanceTimeRowPrefix, day, index, '1']);
+          }
+          if (entry.show_report_time) {
+            shiftTimeRows.push([showReportTimeRowPrefix, day, index, '1']);
+          }
+          if (entry.attendance_times && entry.attendance_times.length) {
+            shiftTimeRows.push([attendanceTimesRowPrefix, day, index, formatAttendanceTimesForCsv(entry.attendance_times)]);
+          }
+          if (entry.report_time) {
+            shiftTimeRows.push([reportTimeRowPrefix, day, index, entry.report_time]);
+          }
           substituteMetadataRows.forEach(([prefix, field, isBoolean]) => {
             if (isBoolean) {
               if (entry[field]) {
@@ -3560,6 +3798,7 @@ const ShifterSync = (function() {
       .concat(siteNameRows)
       .concat(siteBranchRowIdRows)
       .concat(siteBranchRows)
+      .concat(shiftTimeRows)
       .concat(substituteRows)
       .concat(state.mode === 'person' && state.targetEmployeeNumber ? [[projectEmployeeNumberRowPrefix, state.targetEmployeeNumber]] : [])
       .map((row) => row.map((cell) => csvEscape(cell)).join(','))

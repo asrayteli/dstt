@@ -7,6 +7,7 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import deferred
 
 from .security.column_crypto import EncryptedText
+from .site_shift_times import normalize_attendance_times, normalize_time_text
 
 db = SQLAlchemy()
 JST = timezone(timedelta(hours=9))
@@ -870,6 +871,10 @@ class Site(db.Model):
     site_register = db.Column(db.String(80), nullable=False, index=True)
     site_updater = db.Column(db.String(80), nullable=False, index=True)
     office_code = db.Column(db.String(20), nullable=True, index=True)
+    # 勤怠時間は中抜け休憩に対応するため [{"start": "HH:MM", "end": "HH:MM"}, ...] を保持する。
+    # 出勤時間は "HH:MM" の単発値。どちらも未設定（既存データ）は NULL のまま扱う。
+    attendance_times = db.Column(db.JSON, nullable=True)
+    report_time = db.Column(db.String(5), nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utc_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
@@ -901,6 +906,8 @@ class Site(db.Model):
             'site_register': self.site_register,
             'site_updater': self.site_updater,
             'office_code': self.office_code,
+            'attendance_times': normalize_attendance_times(self.attendance_times),
+            'report_time': normalize_time_text(self.report_time),
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -926,6 +933,9 @@ class SiteBranch(db.Model):
     cloudshift_option_key = db.Column(db.String(20), nullable=False, index=True)
     site_register = db.Column(db.String(80), nullable=False, index=True)
     site_updater = db.Column(db.String(80), nullable=False, index=True)
+    # 枝番号側の勤怠時間・出勤時間は親現場の値を上書きする（未設定なら親現場を継承）。
+    attendance_times = db.Column(db.JSON, nullable=True)
+    report_time = db.Column(db.String(5), nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utc_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
@@ -940,6 +950,8 @@ class SiteBranch(db.Model):
             'cloudshift_option_key': self.cloudshift_option_key,
             'site_register': self.site_register,
             'site_updater': self.site_updater,
+            'attendance_times': normalize_attendance_times(self.attendance_times),
+            'report_time': normalize_time_text(self.report_time),
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

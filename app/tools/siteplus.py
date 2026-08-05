@@ -10,6 +10,15 @@ from sqlalchemy import false, func, or_
 
 from app.models import Employee, Site, SiteBranch, SiteContractMaster, db, utc_now
 from app.site_contract_master import ensure_contract_master_synced
+from app.site_shift_times import (
+    format_attendance_times,
+    format_report_time,
+    normalize_attendance_times,
+    normalize_time_text,
+    parse_attendance_times,
+    parse_time_text,
+    resolve_shift_times,
+)
 
 try:
     from .shiftersync_format import SHIFT_OPTION_MAPPINGS
@@ -34,13 +43,23 @@ SITE_FIELD_LABELS = {
     "site_manager_first": "担当者(名)",
     "site_manager_id": "担当者ID",
     "office_code": "営業所コード",
+    "attendance_times": "勤怠時間",
+    "report_time": "出勤時間",
     "is_active": "有効状態",
 }
 
 BRANCH_FIELD_LABELS = {
     "site_branch": "枝番号",
     "cloudshift_option_key": "CloudShiftオプション",
+    "attendance_times": "勤怠時間",
+    "report_time": "出勤時間",
     "is_active": "有効状態",
+}
+
+# 変更差分を人が読める形にするための整形（空は「未設定」と明示する）。
+SHIFT_TIME_FORMATTERS = {
+    "attendance_times": lambda value: format_attendance_times(value) or "未設定",
+    "report_time": lambda value: format_report_time(value) or "未設定",
 }
 
 
@@ -206,6 +225,19 @@ def _compose_contract_code(site_id, site_branch) -> str:
 
 def _site_manager_name(site: Site) -> str:
     return f"{site.site_manager_last} {site.site_manager_first}".strip()
+
+
+def _shift_time_payload_from_request(data: dict, *, existing=None) -> dict:
+    """勤怠時間/出勤時間の入力を正規化する。キーが無ければ既存値を維持する。"""
+    if "attendance_times" in data:
+        attendance_times = parse_attendance_times(data.get("attendance_times"))
+    else:
+        attendance_times = normalize_attendance_times(getattr(existing, "attendance_times", None))
+    if "report_time" in data:
+        report_time = parse_time_text(data.get("report_time"), "出勤時間")
+    else:
+        report_time = normalize_time_text(getattr(existing, "report_time", None))
+    return {"attendance_times": attendance_times, "report_time": report_time}
 
 
 def _normalize_option_key(value) -> str:
@@ -532,6 +564,7 @@ def _site_payload_from_request(data: dict, *, existing: Site | None = None) -> d
         "site_manager_first": site_manager_first,
         "site_manager_id": site_manager_id,
         "office_code": office_code,
+        **_shift_time_payload_from_request(data, existing=existing),
         "is_active": is_active,
     }
 
@@ -553,6 +586,7 @@ def _branch_payload_from_request(data: dict, site: Site, *, existing: SiteBranch
     return {
         "site_branch": site_branch,
         "cloudshift_option_key": cloudshift_option_key,
+        **_shift_time_payload_from_request(data, existing=existing),
         "is_active": is_active,
     }
 
@@ -560,7 +594,7 @@ def _branch_payload_from_request(data: dict, site: Site, *, existing: SiteBranch
 def _site_preview_response(payload: dict, *, existing: Site | None = None) -> dict:
     before = existing.to_dict(include_branches=False) if existing else {}
     duplicates = _site_duplicate_rows(payload["site_name"], exclude_site_row_id=existing.id if existing else None)
-    changes = _changes_for_payload(before, payload, SITE_FIELD_LABELS)
+    changes = _changes_for_payload(before, payload, SITE_FIELD_LABELS, formatters=SHIFT_TIME_FORMATTERS)
     return {
         "normalized": payload,
         "duplicates": duplicates,
@@ -576,7 +610,7 @@ def _branch_preview_response(payload: dict, branch: SiteBranch | None = None) ->
         before,
         payload,
         BRANCH_FIELD_LABELS,
-        formatters={"cloudshift_option_key": _site_option_label},
+        formatters={"cloudshift_option_key": _site_option_label, **SHIFT_TIME_FORMATTERS},
     )
     return {
         "normalized": payload,
@@ -1383,6 +1417,8 @@ def api_cloudshift_sites():
                     "site_id": site.site_id,
                     "site_name": site.site_name,
                     "active_branch_count": len([branch for branch in site.branches if branch.is_active]),
+                    "attendance_times": normalize_attendance_times(site.attendance_times),
+                    "report_time": normalize_time_text(site.report_time),
                 }
                 for site in sites
             ]
@@ -1405,6 +1441,8 @@ def api_cloudshift_branches(site_id: str):
         {
             **branch.to_dict(),
             "option_label": _site_option_label(branch.cloudshift_option_key),
+            # 枝番号未設定分は親現場を継承した値。CloudShift 側で再解決しなくて済むようにする。
+            "resolved_shift_times": resolve_shift_times(site, branch),
         }
         for branch in site.branches
         if branch.is_active
@@ -1415,6 +1453,8 @@ def api_cloudshift_branches(site_id: str):
                 "id": site.id,
                 "site_id": site.site_id,
                 "site_name": site.site_name,
+                "attendance_times": normalize_attendance_times(site.attendance_times),
+                "report_time": normalize_time_text(site.report_time),
             },
             "branches": branches,
         }
