@@ -109,6 +109,7 @@ const ShifterSync = (function() {
     editable: true,
     selectedOptions: {},
     selectedSecondOptions: {},
+    selectedShiftTimeToggles: {},
     modalDay: null,
     modalEntryId: null,
     siteContext: null,
@@ -677,6 +678,25 @@ const ShifterSync = (function() {
 
   function clearSelectedOptionsForDay(day) {
     state.selectedOptions[String(day)] = [];
+  }
+
+  function getSelectedShiftTimeTogglesForDay(day) {
+    const stored = state.selectedShiftTimeToggles[String(day)] || {};
+    return {
+      show_attendance_time: stored.show_attendance_time === true,
+      show_report_time: stored.show_report_time === true
+    };
+  }
+
+  function setSelectedShiftTimeToggleForDay(day, key, value) {
+    const dayKey = String(day);
+    const current = getSelectedShiftTimeTogglesForDay(dayKey);
+    current[key] = value === true;
+    state.selectedShiftTimeToggles[dayKey] = current;
+  }
+
+  function clearSelectedShiftTimeTogglesForDay(day) {
+    state.selectedShiftTimeToggles[String(day)] = { show_attendance_time: false, show_report_time: false };
   }
 
   function getSelectedSecondOptionForDay(day) {
@@ -1666,31 +1686,60 @@ const ShifterSync = (function() {
       : { attendance_times: [], report_time: '' };
   }
 
-  function buildShiftTimeToggleRow(day, values) {
-    const dayKey = String(day == null ? '' : day);
-    const showAttendance = !!(values && values.show_attendance_time);
-    const showReport = !!(values && values.show_report_time);
-    const row = $('<div>').addClass('ss-shift-time-toggles');
-    const makeToggle = (className, label, checked) => $('<label>')
-      .addClass('ss-shift-time-toggle')
-      .append(
-        $('<input>')
-          .attr('type', 'checkbox')
-          .addClass(className)
-          .attr('data-day', dayKey)
-          .prop('checked', checked),
-        $('<span>').text(label)
-      );
-    row.append(
-      makeToggle('entry-show-attendance-time', '勤怠時間を表示', showAttendance),
-      makeToggle('entry-show-report-time', '出勤時間を表示', showReport)
-    );
-    row.append(
+  // オプション選択ポップアップ内の「現場の時間表示」セクション。
+  // 追加欄に置くと見落とされやすいため、オプションと同じ場所でまとめて設定する。
+  function createShiftTimeSection(dayKey) {
+    const section = $('<div>').addClass('popup-section');
+    section.append('<div class="popup-section-title">現場の時間表示</div>');
+    const list = $('<div>').addClass('ss-shift-time-toggles');
+    const selected = getSelectedShiftTimeTogglesForDay(dayKey);
+    [
+      { field: 'show_attendance_time', label: '勤怠時間を表示' },
+      { field: 'show_report_time', label: '出勤時間を表示' }
+    ].forEach((item) => {
+      const input = $('<input>')
+        .attr('type', 'checkbox')
+        .addClass('shift-time-toggle-input')
+        .attr('data-day', dayKey)
+        .attr('data-shift-time-field', item.field)
+        .prop('checked', selected[item.field] === true)
+        .on('change', function() {
+          setSelectedShiftTimeToggleForDay(dayKey, item.field, $(this).prop('checked'));
+        });
+      list.append($('<label>').addClass('ss-shift-time-toggle').append(input, $('<span>').text(item.label)));
+    });
+    section.append(list);
+    section.append(
       $('<div>')
-        .addClass('ss-shift-time-note')
-        .text('現場リストPLUSに登録された時間をシフト対象者に表示します。')
+        .addClass('popup-section-note')
+        .text(shiftTimeSectionNote())
     );
-    return row;
+    return section;
+  }
+
+  // その現場に何が登録されているかを、チェックする前に見せる。
+  function shiftTimeSectionNote() {
+    if (isSceneMode()) {
+      const times = siteContextShiftTimes();
+      const attendance = formatAttendanceTimes(times.attendance_times);
+      const report = shiftTimeDisplay(times.report_time);
+      if (!attendance && !report) {
+        return 'この現場には勤怠時間・出勤時間が登録されていません。現場リストPLUSで登録してください。';
+      }
+      return `現場リストPLUSの登録内容: 勤怠 ${attendance || '未設定'} / 出勤 ${report || '未設定'}（枝番号で上書きがある場合はその値）`;
+    }
+    return '現場リストPLUSに登録された時間をシフト対象者に表示します。現場を選んでから追加してください。';
+  }
+
+  function updateShiftTimeToggleStates(dayKey, overlay) {
+    if (!overlay || !overlay.length) {
+      return;
+    }
+    const selected = getSelectedShiftTimeTogglesForDay(dayKey);
+    overlay.find('.shift-time-toggle-input').each(function() {
+      const field = String($(this).attr('data-shift-time-field') || '');
+      $(this).prop('checked', selected[field] === true);
+    });
   }
 
   // チェックを入れたときに何が出るのかを、モーダル上でそのまま見せる。
@@ -1726,20 +1775,6 @@ const ShifterSync = (function() {
       attendance_times: entry.attendance_times,
       report_time: entry.report_time
     };
-  }
-
-  function shiftTimeToggleValuesForDay(day) {
-    const dayKey = String(day || '');
-    return {
-      show_attendance_time: $(`.entry-show-attendance-time[data-day='${dayKey}']`).prop('checked') === true,
-      show_report_time: $(`.entry-show-report-time[data-day='${dayKey}']`).prop('checked') === true
-    };
-  }
-
-  function resetShiftTimeTogglesForDay(day) {
-    const dayKey = String(day || '');
-    $(`.entry-show-attendance-time[data-day='${dayKey}']`).prop('checked', false);
-    $(`.entry-show-report-time[data-day='${dayKey}']`).prop('checked', false);
   }
 
   function hasPendingLeaveChangeRequest(entry) {
@@ -2121,8 +2156,6 @@ const ShifterSync = (function() {
       .attr('data-search-kind', 'day')
       .attr('data-day', day);
 
-    // 個人シフトのみ: 現場リストPLUS の勤怠時間/出勤時間をシフト対象者に見せるかを選ぶ。
-    const shiftTimeToggles = isShiftTimeToggleAvailable() ? buildShiftTimeToggleRow(day) : null;
 
     const optionBtn = $('<button>')
       .attr('type', 'button')
@@ -2155,11 +2188,7 @@ const ShifterSync = (function() {
     if (masterSideInput) {
       inputGroup.append(masterSideInput);
     }
-    inputGroup.append(selectionNote, candidatePanel);
-    if (shiftTimeToggles) {
-      inputGroup.append(shiftTimeToggles);
-    }
-    inputGroup.append(commentInput, controlsGrid);
+    inputGroup.append(selectionNote, candidatePanel, commentInput, controlsGrid);
     dayBox.append(inputGroup);
     return dayBox;
   }
@@ -2780,7 +2809,7 @@ const ShifterSync = (function() {
       site_branch: autoBranchFields.site_branch,
       ...(isShiftTimeToggleAvailable()
         ? {
-          ...shiftTimeToggleValuesForDay(dayKey),
+          ...getSelectedShiftTimeTogglesForDay(dayKey),
           // 保存時にサーバーが現場マスタの最新値で上書きする。ここでは即時表示用。
           ...(isSceneMode()
             ? shiftTimesForNewSceneEntry(autoBranchFields.site_branch_row_id)
@@ -2805,11 +2834,11 @@ const ShifterSync = (function() {
       clearSiteSelectionForInput(masterSideInput);
     }
     commentInput.val('');
-    resetShiftTimeTogglesForDay(dayKey);
     clearEmployeeSelectionForInput(nameInput);
     clearSiteSelectionForInput(nameInput);
     clearSelectedOptionsForDay(dayKey);
     clearSelectedSecondOptionForDay(dayKey);
+    clearSelectedShiftTimeTogglesForDay(dayKey);
     updateOptionSelectButton(dayKey);
   }
 
@@ -2978,12 +3007,19 @@ const ShifterSync = (function() {
     }
     const selected = getSelectedOptionsForDay(day)[0];
     const second = getSelectedSecondOptionForDay(day);
+    const shiftTimes = getSelectedShiftTimeTogglesForDay(day);
     const labels = [];
     if (selected) {
       labels.push(allOptionMappings[selected] || selected);
     }
     if (second) {
       labels.push(secondOptionMappings[second] || second);
+    }
+    if (shiftTimes.show_attendance_time) {
+      labels.push('勤怠');
+    }
+    if (shiftTimes.show_report_time) {
+      labels.push('出勤');
     }
     if (!labels.length) {
       btn.html('<span>\u8a2d\u5b9a</span><span>OP\u7121\u3057</span>');
@@ -3010,6 +3046,9 @@ const ShifterSync = (function() {
     const secondCol = $('<div>').addClass('ss-option-popup-col ss-option-popup-col-second');
     secondCol.append('<div class="ss-option-popup-col-title">\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3</div>');
     secondCol.append(createSecondOptionSection(dayKey));
+    if (isShiftTimeToggleAvailable()) {
+      secondCol.append(createShiftTimeSection(dayKey));
+    }
     columns.append(firstCol, secondCol);
     popup.append(columns);
 
@@ -3021,7 +3060,9 @@ const ShifterSync = (function() {
         .on('click', function() {
           clearSelectedOptionsForDay(dayKey);
           clearSelectedSecondOptionForDay(dayKey);
+          clearSelectedShiftTimeTogglesForDay(dayKey);
           updateOptionButtonStates(dayKey, overlay);
+          updateShiftTimeToggleStates(dayKey, overlay);
         })
     );
     footer.append(
@@ -3039,6 +3080,7 @@ const ShifterSync = (function() {
     $('body').append(overlay);
 
     updateOptionButtonStates(dayKey, overlay);
+    updateShiftTimeToggleStates(dayKey, overlay);
 
     overlay.on('click', function(e) {
       if (e.target === overlay[0]) {
@@ -3773,6 +3815,7 @@ const ShifterSync = (function() {
     state.entriesPerDay = {};
     state.selectedOptions = {};
     state.selectedSecondOptions = {};
+    state.selectedShiftTimeToggles = {};
 
     ensureModalScaffold();
     bindModalEvents();

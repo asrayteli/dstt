@@ -508,29 +508,21 @@ h1, h2, h3 {
     word-break: break-word;
 }
 
+/* オプション選択ポップアップ内の「現場の時間表示」。 */
 .ss-shift-time-toggles {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 12px;
-    margin-top: 4px;
+    display: grid;
+    gap: 8px;
+    margin-top: 2px;
 }
 
 .ss-shift-time-toggle {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 5px;
-    font-size: 11px;
+    gap: 8px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--ss-ink);
     cursor: pointer;
-}
-
-.ss-shift-time-note {
-    flex-basis: 100%;
-    color: var(--ss-muted);
-    font-size: 10px;
-    line-height: 1.4;
 }
 
 .ss-check-row {

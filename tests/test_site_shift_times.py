@@ -1182,3 +1182,34 @@ def test_shift_times_survive_both_soft_and_hard_site_deletion(tmp_path):
         db.session.delete(db.session.get(Site, site_row_id))
         db.session.commit()
     assert current_label() == "勤怠：10:00~19:00、出勤：9:40"
+
+
+def test_shift_time_toggles_live_in_the_option_popup_not_the_add_form():
+    """勤怠/出勤のチェックは日付セルの追加欄ではなく「オプション選択」に置く。
+
+    追加欄はコメント欄の上に埋もれて見落とされやすかったため、オプションと同じ
+    ポップアップへ移した。日別の選択はオプション・第二オプションと同じく state で持つ。
+    """
+    source = (ROOT / "app" / "static" / "shiftersync" / "js" / "ss_common.js").read_text(encoding="utf-8")
+
+    # オプション選択ポップアップ側にセクションがある。
+    assert "function createShiftTimeSection(dayKey)" in source
+    assert "secondCol.append(createShiftTimeSection(dayKey));" in source
+    assert "現場の時間表示" in source
+
+    # 追加欄に置いていた旧実装が戻っていないこと。
+    assert "buildShiftTimeToggleRow" not in source
+    assert "entry-show-attendance-time" not in source
+    assert "entry-show-report-time" not in source
+
+    # 日別の選択状態は state 管理で、カレンダー再構築と追加後にリセットされる。
+    assert "selectedShiftTimeToggles: {}," in source
+    assert "state.selectedShiftTimeToggles = {};" in source
+    assert "clearSelectedShiftTimeTogglesForDay(dayKey);" in source
+
+    # 「設定」ボタンのラベルにも状態を出す。
+    add_entry = source[source.index("function updateOptionSelectButton"):]
+    add_entry = add_entry[: add_entry.index("function showOptionPopup")]
+    assert "shiftTimes.show_attendance_time" in add_entry
+    assert "'勤怠'" in add_entry
+    assert "'出勤'" in add_entry
