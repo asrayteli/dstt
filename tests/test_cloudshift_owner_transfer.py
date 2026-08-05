@@ -478,9 +478,9 @@ def test_scene_shift_owner_transfer_keeps_site_link_and_blocks_duplicate_owner(t
 
 
 def test_owner_transfer_ui_lives_in_the_shift_book_settings_modal():
-    """入口は「シフト帳の設定 → オーナー変更」タブ。
+    """入口は「シフト帳の設定 → オーナー変更」タブに一本化されている。
 
-    大規模シフトは設定モーダル自体が対象外なので、アクションの単独ボタンを残す。
+    大規模シフトも設定モーダルを開けるようになったため、アクションの単独ボタンは廃止。
     """
     script = (ROOT / "app" / "templates" / "_cloudshift_script.html").read_text(encoding="utf-8")
     html = (ROOT / "app" / "templates" / "cloudshift.html").read_text(encoding="utf-8")
@@ -488,9 +488,9 @@ def test_owner_transfer_ui_lives_in_the_shift_book_settings_modal():
     assert 'data-shift-settings-tab="owner"' in script
     assert "${activeTab === 'owner' ? `" in script
     assert "ownerTransferFormHtml()" in script
-    # 単独ボタンは大規模シフトのときだけ出す。
-    assert 'id="cloud-transfer-owner"' in html
-    assert "$('cloud-transfer-owner').classList.toggle('cloud-hidden', !canManageProject || project.mode !== 'large')" in script
+    # 単独ボタンとその専用モーダルは残っていない。
+    assert 'id="cloud-transfer-owner"' not in html
+    assert "cloud-transfer-owner" not in script
     # 候補検索はDSTTアカウント（社員名簿検索ではない）。
     assert "/owner/candidates?q=" in script
     assert "fetchOwnerTransferCandidates" in script

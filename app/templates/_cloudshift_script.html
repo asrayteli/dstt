@@ -7715,14 +7715,10 @@
       if ($('cloud-workspace')) $('cloud-workspace').classList.toggle('is-draft-mode', state.editorMode === 'draft');
       if ($('cloud-create-first-month')) $('cloud-create-first-month').classList.toggle('cloud-hidden', !isOwnerEditable);
       if ($('cloud-open-shift-book-settings')) {
-        $('cloud-open-shift-book-settings').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute' || project.mode === 'large');
+        // 大規模シフトも共有・オーナー変更・共有URL・復元をここから扱う
+        // （申請と通知先のタブはモード判定で出さない）。
+        $('cloud-open-shift-book-settings').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
         setNotificationBadge($('cloud-open-shift-book-settings'), unviewedLeaveChangeRequestCount(project));
-      }
-      if ($('cloud-transfer-owner')) {
-        // 通常のシフト帳では「シフト帳の設定 → オーナー変更」タブが入口。
-        // 大規模シフトはその設定モーダル自体が対象外のため、ここに単独ボタンを残す
-        // （残さないと大規模シフトだけオーナーを変更できなくなる）。
-        $('cloud-transfer-owner').classList.toggle('cloud-hidden', !canManageProject || project.mode !== 'large');
       }
       if ($('cloud-open-summary')) $('cloud-open-summary').classList.toggle('cloud-hidden', !month || project.mode === 'large');
       if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', project.mode === 'large' || !isOwnerEditable || !isAssistAvailable());
@@ -8514,7 +8510,6 @@
     // ===== オーナー変更（所有権の移譲） =====
     // 担当の異動などでシフト帳の持ち主が変わるとき、削除して作り直さずに
     // 所有権だけを別の DSTT アカウントへ移すためのモーダル。
-    const OWNER_TRANSFER_MODAL_ID = 'cloud-owner-transfer-modal';
 
     function ownerTransferSelectedNumber() {
       const selected = state.ownerTransfer.selected;
@@ -8681,8 +8676,7 @@
           state.ownerTransfer.shareWithPreviousOwner = !!shareBack.checked;
         });
       }
-      // 閉じる／実行ボタンはフッター側。単独モーダルとシフト帳の設定モーダルの
-      // どちらに載っていても同じ処理になるよう、モーダルIDは実体から取る。
+      // 閉じる／実行ボタンはフッター側。モーダルIDは実体から取る。
       const closeButton = modalFooter(modal).querySelector('[data-owner-transfer-close]');
       if (closeButton) closeButton.addEventListener('click', () => closeCloudModal(modal.id));
       const submit = modalFooter(modal).querySelector('[data-owner-transfer-submit]');
@@ -8691,8 +8685,7 @@
       }
     }
 
-    // 単独モーダル（大規模シフト用）と「シフト帳の設定 → オーナー変更」タブで
-    // 同じフォームを使う。
+    // 「シフト帳の設定 → オーナー変更」タブのフォーム（全モード共通）。
     function ownerTransferFormHtml() {
       const project = currentProject();
       const info = state.ownerTransfer.info || {};
@@ -8732,17 +8725,6 @@
       `;
     }
 
-    function renderOwnerTransferModalBody(modal) {
-      const info = state.ownerTransfer.info || {};
-      modalBody(modal).innerHTML = `<div class="cloud-settings-panel">${ownerTransferFormHtml()}</div>`;
-      modalFooter(modal).innerHTML = `
-        <button type="button" class="cloud-btn secondary" data-owner-transfer-close>閉じる</button>
-        ${info.can_transfer ? '<button type="button" class="cloud-btn primary" data-owner-transfer-submit disabled>オーナーを変更する</button>' : ''}
-      `;
-      bindOwnerTransferModalEvents(modal);
-      renderOwnerTransferStatus(modal);
-    }
-
     function resetOwnerTransferState() {
       state.ownerTransfer = {
         info: null,
@@ -8756,28 +8738,6 @@
 
     async function loadOwnerTransferInfo(projectId) {
       return requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}/owner`);
-    }
-
-    async function openOwnerTransferModal() {
-      const project = currentProject();
-      if (!project || projectAccessRole(project) !== 'owner') return;
-      resetOwnerTransferState();
-      const modal = openCloudModal(OWNER_TRANSFER_MODAL_ID, `オーナー変更 / ${project.title}`);
-      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>オーナー情報を読み込み中です...</p></div>';
-      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-owner-transfer-close>閉じる</button>';
-      modalFooter(modal).querySelector('[data-owner-transfer-close]').addEventListener('click', () => closeCloudModal(OWNER_TRANSFER_MODAL_ID));
-      try {
-        state.ownerTransfer.info = await loadOwnerTransferInfo(project.id);
-      } catch (error) {
-        // 読み込みに失敗したまま「読み込み中」を出し続けないよう、理由を表示する。
-        modalBody(modal).innerHTML = `<div class="cloud-empty-state"><p>${escapeHtml(error.message || 'オーナー情報を読み込めませんでした。')}</p></div>`;
-        throw error;
-      }
-      renderOwnerTransferModalBody(modal);
-      const queryInput = modal.querySelector('[data-owner-transfer-query]');
-      if (queryInput) {
-        try { queryInput.focus(); } catch (_) { /* noop */ }
-      }
     }
 
     async function transferProjectOwner(modal) {
@@ -10170,9 +10130,6 @@
 
       const shiftBookSettings = $('cloud-open-shift-book-settings');
       if (shiftBookSettings) shiftBookSettings.addEventListener('click', () => openShiftBookSettingsModal().catch((error) => showFlash(error.message, 'error')));
-
-      const transferOwner = $('cloud-transfer-owner');
-      if (transferOwner) transferOwner.addEventListener('click', () => openOwnerTransferModal().catch((error) => showFlash(error.message, 'error')));
 
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {
