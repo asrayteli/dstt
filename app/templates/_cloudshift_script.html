@@ -294,6 +294,14 @@
       return key === 'SUB' || key === 'TRAIN' ? key : '';
     }
 
+    // 勤怠/出勤を扱えるのは、現場が特定できるシフト帳だけ（個人シフト、または現場を
+    // 紐付けた現場シフト）。
+    function shiftTimeTogglesAvailableForProject(project) {
+      if (!project) return false;
+      if (project.mode === 'person') return true;
+      return project.mode === 'scene' && !!(project.site && project.site.is_linked);
+    }
+
     function createBulkEntryFromForm(dayKey, refs) {
       const name = refs.nameInput ? refs.nameInput.value.trim() : '';
       if (!name) return null;
@@ -7232,7 +7240,7 @@
                 </select>
                 <div class="cloud-inline-note" data-bulk-branch-note>必要に応じて枝番号を選択してください</div>
               </label>
-              <div class="cloud-field cloud-field-wide${project.mode === 'person' ? '' : ' cloud-hidden'}" data-bulk-shift-time-field>
+              <div class="cloud-field cloud-field-wide${shiftTimeTogglesAvailableForProject(project) ? '' : ' cloud-hidden'}" data-bulk-shift-time-field>
                 <span>現場の時間表示</span>
                 <label class="cloud-check-row"><input type="checkbox" name="bulk_show_attendance_time"><span>勤怠時間を表示</span></label>
                 <label class="cloud-check-row"><input type="checkbox" name="bulk_show_report_time"><span>出勤時間を表示</span></label>
@@ -7589,6 +7597,10 @@
         && state.projectPayload
         && state.projectPayload.viewer_capabilities
         && state.projectPayload.viewer_capabilities.leave_change_request;
+      // 現場コンテキストはカレンダー構築より前に入れる。日付セルの「勤怠時間を表示」
+      // チェックボックスは現場が紐付いた現場シフトでのみ描画するため、後から入れても
+      // 入力欄は再描画されず、チェックボックスが出ないままになる。
+      setShifterSyncSiteStateForCurrentProject();
       ShifterSync.buildCalendar(month.year, month.month, project.mode, displayedEntriesForMonth(month), {
         editable,
         substituteRequestEnabled,
@@ -8202,17 +8214,23 @@
       }
       if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずに月を作成すると、このセッションでの編集内容は失われます。続行しますか？')) return;
 
-      const sourceMonthKey = currentMonthKey();
-      const useCopy = sourceMonthKey
-        ? window.confirm(`${formatMonthKey(targetKey)} を現在の月からコピーして作成しますか？\nOK: コピー / キャンセル: 空で作成`)
-        : false;
+      // 前月コピーは廃止し、常に空の月を作る（引き継ぎは範囲一括編集・テンプレートで行う）。
+      // 月ピッカーから作る初回の月は、そのダイアログ自体が確認になっているので聞き直さない。
+      if (currentMonthKey()) {
+        const confirmed = await cloudConfirm({
+          title: '月を追加',
+          message: `${formatMonthKey(targetKey)} を追加します。よろしいですか？`,
+          confirmLabel: '追加する'
+        });
+        if (!confirmed) return;
+      }
       clearPendingSubstituteRequests();
 
       const body = {
         year: parsed.year,
         month: parsed.month,
-        init_mode: useCopy ? 'copy' : 'blank',
-        source_month_key: useCopy ? sourceMonthKey : null,
+        init_mode: 'blank',
+        source_month_key: null,
         required_capacity: parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0
       };
 

@@ -13,6 +13,7 @@ $(document).ready(function() {
   const showReportTimeRowPrefix = '#show_report_time';
   const attendanceTimesRowPrefix = '#attendance_times';
   const reportTimeRowPrefix = '#report_time';
+  const shiftTimeBranchRowIdRowPrefix = '#shift_time_branch_row_id';
   const metadataFieldByPrefix = {
     [secondOptionRowPrefix]: 'second_option',
     [employeeNameRowPrefix]: 'employee_name',
@@ -26,6 +27,7 @@ $(document).ready(function() {
     [showReportTimeRowPrefix]: 'show_report_time',
     [attendanceTimesRowPrefix]: 'attendance_times',
     [reportTimeRowPrefix]: 'report_time',
+    [shiftTimeBranchRowIdRowPrefix]: 'shift_time_branch_row_id',
     '#substitute_request_type': 'substitute_request_type',
     '#substitute_helper_employee_name': 'substitute_helper_employee_name',
     '#substitute_helper_employee_number': 'substitute_helper_employee_number',
@@ -166,7 +168,8 @@ $(document).ready(function() {
       show_attendance_time: false,
       show_report_time: false,
       attendance_times: [],
-      report_time: ''
+      report_time: '',
+      shift_time_branch_row_id: ''
     };
   }
 

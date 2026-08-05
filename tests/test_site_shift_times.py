@@ -661,3 +661,484 @@ def test_calendar_pdf_export_renders_with_shift_times(tmp_path):
     }
     shiftersync.generate_pdf_calendar(output, 2026, 4, "person", "Person Shift", day_map)
     assert output.exists() and output.stat().st_size > 0
+
+
+# ---------------------------------------------------------------- 現場シフト
+
+
+def _create_scene_project_with_entry(module, app, *, site_row_id, entry_extra):
+    client = app.test_client()
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scene Shift",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert create_response.status_code == 200
+    project_payload = create_response.get_json()["project"]
+    project_id = project_payload["project"]["id"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": project_payload["month"],
+            "entries_per_day": {
+                "1": [
+                    {
+                        "id": "scene-entry-1",
+                        "value": "山田 太郎",
+                        "comment": "点呼あり",
+                        "employee_name": "山田 太郎",
+                        "employee_number": "1234",
+                        **entry_extra,
+                    }
+                ]
+            },
+        },
+    )
+    assert save_response.status_code == 200
+    return client, project_id, save_response.get_json()["month"]
+
+
+def test_scene_entry_pulls_shift_times_from_the_books_own_site(tmp_path):
+    """現場シフトはエントリに現場リンクが無いので、帳簿の現場から時間を引く。"""
+    module, app = _build_cloudshift_app(tmp_path)
+    site_row_id = _create_site(
+        app,
+        site_id="22222",
+        site_name="Scene Site",
+        attendance_times=[{"start": "10:00", "end": "19:00"}],
+        report_time="09:40",
+    )
+
+    _client, _project_id, month = _create_scene_project_with_entry(
+        module,
+        app,
+        site_row_id=site_row_id,
+        entry_extra={"show_attendance_time": True, "show_report_time": True},
+    )
+
+    entry = month["entries_per_day"]["1"][0]
+    assert entry["attendance_times"] == [{"start": "10:00", "end": "19:00"}]
+    assert entry["report_time"] == "09:40"
+    assert entry_shift_time_label(entry) == "勤怠：10:00~19:00、出勤：9:40"
+
+
+def test_scene_entry_branch_overrides_the_books_site_times(tmp_path):
+    module, app = _build_cloudshift_app(tmp_path)
+    site_row_id = _create_site(
+        app,
+        site_id="22222",
+        site_name="Scene Site",
+        attendance_times=[{"start": "10:00", "end": "19:00"}],
+        report_time="09:40",
+    )
+    with app.app_context():
+        branch = SiteBranch(
+            site_row_id=site_row_id,
+            site_branch="001",
+            cloudshift_option_key="O",
+            site_register="owner01",
+            site_updater="owner01",
+            attendance_times=[{"start": "08:00", "end": "17:00"}],
+            report_time="07:30",
+            is_active=True,
+        )
+        db.session.add(branch)
+        db.session.commit()
+        branch_row_id = branch.id
+
+    _client, _project_id, month = _create_scene_project_with_entry(
+        module,
+        app,
+        site_row_id=site_row_id,
+        entry_extra={
+            "show_attendance_time": True,
+            "show_report_time": True,
+            "site_branch_row_id": str(branch_row_id),
+            "site_branch": "001",
+        },
+    )
+
+    entry = month["entries_per_day"]["1"][0]
+    assert entry["attendance_times"] == [{"start": "08:00", "end": "17:00"}]
+    assert entry["report_time"] == "07:30"
+
+
+def test_scene_entry_shift_times_stay_hidden_when_toggles_are_off(tmp_path):
+    module, app = _build_cloudshift_app(tmp_path)
+    site_row_id = _create_site(
+        app,
+        site_id="22222",
+        site_name="Scene Site",
+        attendance_times=[{"start": "10:00", "end": "19:00"}],
+        report_time="09:40",
+    )
+    _client, _project_id, month = _create_scene_project_with_entry(
+        module, app, site_row_id=site_row_id, entry_extra={}
+    )
+    entry = month["entries_per_day"]["1"][0]
+    assert entry_shift_time_label(entry) == ""
+
+
+def test_scene_shift_times_reach_the_persons_own_shift_book(tmp_path):
+    """現場シフトでONにした勤怠/出勤が、同期先の個人シフトにも出ること。"""
+    module, app = _build_cloudshift_app(tmp_path)
+    site_row_id = _create_site(
+        app,
+        site_id="22222",
+        site_name="Scene Site",
+        attendance_times=[{"start": "10:00", "end": "19:00"}],
+        report_time="09:40",
+    )
+    with app.app_context():
+        branch = SiteBranch(
+            site_row_id=site_row_id,
+            site_branch="001",
+            cloudshift_option_key="O",
+            site_register="owner01",
+            site_updater="owner01",
+            attendance_times=[{"start": "08:00", "end": "17:00"}],
+            is_active=True,
+        )
+        db.session.add(branch)
+        db.session.commit()
+        branch_row_id = branch.id
+
+    client = app.test_client()
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "山田 太郎",
+            "mode": "person",
+            "year": "2026",
+            "month": "4",
+            "employee_number": "1234",
+        },
+    )
+    assert person_response.status_code == 200
+    person_id = person_response.get_json()["project"]["project"]["id"]
+
+    _scene_client, _scene_id, _month = _create_scene_project_with_entry(
+        module,
+        app,
+        site_row_id=site_row_id,
+        entry_extra={
+            "show_attendance_time": True,
+            "show_report_time": True,
+            "site_branch_row_id": str(branch_row_id),
+            "site_branch": "001",
+        },
+    )
+
+    person_detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}?month_key=2026-04"
+    )
+    assert person_detail.status_code == 200
+    mirrored = [
+        entry
+        for entry in person_detail.get_json()["month"]["entries_per_day"]["1"]
+        if entry.get("sync_source_type") == "scene_shift"
+    ]
+    assert len(mirrored) == 1
+    entry = mirrored[0]
+    # 枝番号の上書きも引き継ぐが、枝番号そのものは個人シフトに表示しない。
+    assert entry["attendance_times"] == [{"start": "08:00", "end": "17:00"}]
+    assert entry["report_time"] == "09:40"
+    assert entry["site_branch_row_id"] == ""
+    assert entry_shift_time_label(entry) == "勤怠：8:00~17:00、出勤：9:40"
+
+
+def test_scene_toggle_change_propagates_to_the_person_shift_later(tmp_path):
+    """後からチェックを入れ直した場合も、同期先の個人シフトへ反映されること。"""
+    module, app = _build_cloudshift_app(tmp_path)
+    site_row_id = _create_site(
+        app,
+        site_id="33333",
+        site_name="Toggle Site",
+        attendance_times=[{"start": "10:00", "end": "19:00"}],
+        report_time="09:40",
+    )
+    client = app.test_client()
+    person_id = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "佐藤 花子",
+            "mode": "person",
+            "year": "2026",
+            "month": "4",
+            "employee_number": "5678",
+        },
+    ).get_json()["project"]["project"]["id"]
+
+    # まずチェックを入れずに現場シフトへ追加する。
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Toggle Scene",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    scene_payload = scene_response.get_json()["project"]
+    scene_id = scene_payload["project"]["id"]
+    entry = {
+        "id": "scene-entry-1",
+        "value": "佐藤 花子",
+        "employee_name": "佐藤 花子",
+        "employee_number": "5678",
+    }
+    first_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_payload["month"],
+            "entries_per_day": {"1": [entry]},
+        },
+    )
+    assert first_save.status_code == 200
+
+    def person_mirror():
+        detail = client.get(
+            f"/tools/shiftersync/cloudshift/api/project/{person_id}?month_key=2026-04"
+        ).get_json()
+        return [
+            item
+            for item in detail["month"]["entries_per_day"]["1"]
+            if item.get("sync_source_type") == "scene_shift"
+        ]
+
+    assert entry_shift_time_label(person_mirror()[0]) == ""
+
+    # あとからチェックを入れて保存し直す。
+    second_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": first_save.get_json()["month"],
+            "entries_per_day": {
+                "1": [{**entry, "show_attendance_time": True, "show_report_time": True}]
+            },
+        },
+    )
+    assert second_save.status_code == 200
+    assert entry_shift_time_label(person_mirror()[0]) == "勤怠：10:00~19:00、出勤：9:40"
+
+
+def test_person_toggle_reaches_the_scene_shift_book(tmp_path):
+    """個人シフトでONにした分が、同じ現場の現場シフト帳のミラーにも出ること。"""
+    module, app = _build_cloudshift_app(tmp_path)
+    site_row_id = _create_site(
+        app,
+        site_id="44444",
+        site_name="Mirror Site",
+        attendance_times=[{"start": "10:00", "end": "19:00"}],
+        report_time="09:40",
+    )
+    client = app.test_client()
+    scene_payload = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Mirror Scene",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    ).get_json()["project"]
+    scene_id = scene_payload["project"]["id"]
+
+    _client, _person_id, _month = _create_person_project_with_entry(
+        module,
+        app,
+        site_row_id=site_row_id,
+        entry_extra={"show_attendance_time": True, "show_report_time": True},
+    )
+
+    scene_detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}?month_key=2026-04"
+    ).get_json()
+    mirrored = [
+        item
+        for item in scene_detail["month"]["entries_per_day"]["1"]
+        if item.get("sync_source_type") == "person_shift"
+    ]
+    assert len(mirrored) == 1
+    assert entry_shift_time_label(mirrored[0]) == "勤怠：10:00~19:00、出勤：9:40"
+
+
+def test_shift_time_branch_hint_ignores_a_branch_from_another_site(tmp_path):
+    """他現場の枝番号IDが紛れ込んでも、親現場の値へ安全に落ちること。"""
+    module, app = _build_cloudshift_app(tmp_path)
+    site_row_id = _create_site(
+        app,
+        site_id="55555",
+        site_name="Own Site",
+        attendance_times=[{"start": "10:00", "end": "19:00"}],
+        report_time="09:40",
+    )
+    other_site_row_id = _create_site(
+        app,
+        site_id="66666",
+        site_name="Other Site",
+        attendance_times=[{"start": "01:00", "end": "02:00"}],
+    )
+    with app.app_context():
+        foreign_branch = SiteBranch(
+            site_row_id=other_site_row_id,
+            site_branch="001",
+            cloudshift_option_key="O",
+            site_register="owner01",
+            site_updater="owner01",
+            attendance_times=[{"start": "03:00", "end": "04:00"}],
+            is_active=True,
+        )
+        db.session.add(foreign_branch)
+        db.session.commit()
+        foreign_branch_id = foreign_branch.id
+
+    _client, _project_id, month = _create_person_project_with_entry(
+        module,
+        app,
+        site_row_id=site_row_id,
+        entry_extra={
+            "show_attendance_time": True,
+            "show_report_time": True,
+            "site_branch_row_id": str(foreign_branch_id),
+        },
+    )
+    entry = month["entries_per_day"]["1"][0]
+    assert entry["attendance_times"] == [{"start": "10:00", "end": "19:00"}]
+    assert entry["report_time"] == "09:40"
+
+
+def test_csv_round_trip_preserves_the_shift_time_branch_hint():
+    entries = {
+        "1": [
+            {
+                "id": "entry-1",
+                "value": "Alpha",
+                "show_attendance_time": True,
+                "attendance_times": [{"start": "08:00", "end": "17:00"}],
+                "shift_time_branch_row_id": "42",
+            }
+        ]
+    }
+    parsed = parse_csv_text(serialize_csv_text("person", 2026, 4, "Tester", 0, entries))
+    assert parsed["entries_per_day"]["1"][0]["shift_time_branch_row_id"] == "42"
+
+
+def test_siteplus_can_clear_shift_times_explicitly(tmp_path):
+    """明示的に空を送ったときだけクリアされること（省略時の保持と区別できる）。"""
+    _module, _app, client = _build_siteplus_client(tmp_path)
+    site = client.post(
+        "/tools/siteplus/api/sites",
+        json={
+            "site_id": "700",
+            "site_name": "Clearable",
+            "site_manager_last": "山田",
+            "site_manager_first": "太郎",
+            "site_manager_id": "9001",
+            "attendance_times": [{"start": "10:00", "end": "19:00"}],
+            "report_time": "9:40",
+        },
+    ).get_json()["site"]
+
+    cleared = client.put(
+        f"/tools/siteplus/api/sites/{site['id']}",
+        json={
+            "site_id": "700",
+            "site_name": "Clearable",
+            "site_manager_last": "山田",
+            "site_manager_first": "太郎",
+            "site_manager_id": "9001",
+            "attendance_times": [],
+            "report_time": "",
+            "confirm_changes": True,
+            "confirm_duplicate": True,
+        },
+    )
+    assert cleared.status_code == 200
+    assert cleared.get_json()["site"]["attendance_times"] == []
+    assert cleared.get_json()["site"]["report_time"] == ""
+
+
+def test_person_entry_without_a_site_link_shows_nothing(tmp_path):
+    """現場を選ばずに手入力しただけのエントリは、チェックしても何も出ない。"""
+    module, app = _build_cloudshift_app(tmp_path)
+    client = app.test_client()
+    project_payload = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Freetext", "mode": "person", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    project_id = project_payload["project"]["id"]
+
+    saved = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": project_payload["month"],
+            "entries_per_day": {
+                "1": [
+                    {
+                        "id": "free-1",
+                        "value": "どこかの現場",
+                        "show_attendance_time": True,
+                        "show_report_time": True,
+                    }
+                ]
+            },
+        },
+    )
+    assert saved.status_code == 200
+    entry = saved.get_json()["month"]["entries_per_day"]["1"][0]
+    assert entry["attendance_times"] == []
+    assert entry_shift_time_label(entry) == ""
+
+
+def test_entry_linked_by_site_id_only_still_resolves_times(tmp_path):
+    """site_row_id が無く契約番号だけのエントリでも現場マスタから引けること。"""
+    module, app = _build_cloudshift_app(tmp_path)
+    _create_site(
+        app,
+        site_id="88888",
+        site_name="Id Only Site",
+        attendance_times=[{"start": "10:00", "end": "19:00"}],
+        report_time="09:40",
+    )
+    client = app.test_client()
+    project_payload = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "IdOnly", "mode": "person", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    project_id = project_payload["project"]["id"]
+
+    saved = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": project_payload["month"],
+            "entries_per_day": {
+                "1": [
+                    {
+                        "id": "idonly-1",
+                        "value": "Id Only Site",
+                        "site_id": "88888",
+                        "site_name": "Id Only Site",
+                        "show_attendance_time": True,
+                        "show_report_time": True,
+                    }
+                ]
+            },
+        },
+    )
+    assert saved.status_code == 200
+    entry = saved.get_json()["month"]["entries_per_day"]["1"][0]
+    assert entry_shift_time_label(entry) == "勤怠：10:00~19:00、出勤：9:40"

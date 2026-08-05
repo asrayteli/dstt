@@ -512,6 +512,7 @@ def _load_site_reference(site_row_id: int | None, *, require_active: bool) -> di
         "is_active": bool(site.is_active),
         "branch_count": len(site.branches),
         "active_branch_count": len([branch for branch in site.branches if branch.is_active]),
+        **resolve_shift_times(site),
     }
 
 
@@ -1791,11 +1792,30 @@ def _copy_shift_times(value: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
-def _entry_with_latest_shift_times(entry: dict[str, Any]) -> dict[str, Any]:
+def _shift_time_source_ids(
+    entry: dict[str, Any], project: dict[str, Any] | None
+) -> tuple[Any, Any]:
+    """勤怠/出勤を引く現場と枝番号を決める。
+
+    - 個人シフト: エントリ自身が指す現場。
+    - 現場シフト: 帳簿そのものが現場に紐づくので、その現場を使う。
+    枝番号はエントリの枝番号を優先し、無ければ同期ミラーが持つ控えを使う
+    （ミラーは枝番号を表示に使えないため、時刻解決用に別フィールドで持つ）。
+    """
+    site_row_id = entry.get("site_row_id")
+    if _coerce_site_row_id(site_row_id) is None and project and str(project.get("mode") or "") == "scene":
+        site_row_id = project.get("site_row_id")
+    branch_row_id = entry.get("site_branch_row_id") or entry.get("shift_time_branch_row_id")
+    return site_row_id, branch_row_id
+
+
+def _entry_with_latest_shift_times(
+    entry: dict[str, Any], project: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """勤怠時間/出勤時間を現場マスタの最新値へ寄せる（引けない場合は保存値を維持）。"""
     if not entry.get("show_attendance_time") and not entry.get("show_report_time"):
         return entry
-    resolved = _site_shift_times_from_master(entry.get("site_row_id"), entry.get("site_branch_row_id"))
+    resolved = _site_shift_times_from_master(*_shift_time_source_ids(entry, project))
     if resolved is None:
         return entry
     entry["attendance_times"] = resolved["attendance_times"]
@@ -1808,7 +1828,8 @@ def _entry_with_latest_site_link(entry: dict[str, Any], project: dict[str, Any] 
         return entry
     site_row_id = _coerce_site_row_id(entry.get("site_row_id"))
     if site_row_id is None and not str(entry.get("site_id") or "").strip():
-        return dict(entry)
+        # 現場シフトのエントリは自身に現場リンクを持たないため、ここでも時刻解決を通す。
+        return _entry_with_latest_shift_times(dict(entry), project)
 
     updated = dict(entry)
     latest = _latest_site_link_fields(
@@ -1822,7 +1843,7 @@ def _entry_with_latest_site_link(entry: dict[str, Any], project: dict[str, Any] 
     if latest["site_name"] and _entry_value_uses_site_link(project, updated):
         option_key, _ = _entry_option_and_name(updated)
         updated["value"] = _format_entry_value(option_key, latest["site_name"])
-    return _entry_with_latest_shift_times(updated)
+    return _entry_with_latest_shift_times(updated, project)
 
 
 def _entries_with_latest_site_links(entries_per_day: Any, project: dict[str, Any] | None) -> Any:
@@ -4882,6 +4903,10 @@ def _build_person_synced_entry_from_scene(
         "site_name": site_name,
         "site_branch_row_id": "",
         "site_branch": "",
+        # 枝番号そのものは個人シフト側で表示できないため、時刻解決用の控えだけ渡す。
+        "shift_time_branch_row_id": str(entry.get("site_branch_row_id") or ""),
+        "show_attendance_time": bool(entry.get("show_attendance_time")),
+        "show_report_time": bool(entry.get("show_report_time")),
         "sync_source_type": SHIFT_SYNC_SCENE_SOURCE,
         "sync_source_project_id": str(source_project.get("id") or ""),
         "sync_source_project_title": str(source_project.get("title") or ""),
@@ -4913,6 +4938,8 @@ def _build_scene_synced_entry_from_person(
         "site_name": "",
         "site_branch_row_id": branch_fields["site_branch_row_id"],
         "site_branch": branch_fields["site_branch"],
+        "show_attendance_time": bool(entry.get("show_attendance_time")),
+        "show_report_time": bool(entry.get("show_report_time")),
         "sync_source_type": SHIFT_SYNC_PERSON_SOURCE,
         "sync_source_project_id": str(source_project.get("id") or ""),
         "sync_source_project_title": str(source_project.get("title") or ""),

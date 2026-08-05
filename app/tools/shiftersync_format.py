@@ -51,6 +51,8 @@ SHOW_ATTENDANCE_TIME_ROW_PREFIX = "#show_attendance_time"
 SHOW_REPORT_TIME_ROW_PREFIX = "#show_report_time"
 ATTENDANCE_TIMES_ROW_PREFIX = "#attendance_times"
 REPORT_TIME_ROW_PREFIX = "#report_time"
+# 同期ミラーが元エントリの枝番号を時刻解決にだけ使うための控え（表示には使わない）。
+SHIFT_TIME_BRANCH_ROW_ID_ROW_PREFIX = "#shift_time_branch_row_id"
 
 SHIFT_OPTION_MAPPINGS = {
     "A": "\u5348\u524d",
@@ -363,6 +365,9 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
                 raw.get("attendance_times", raw.get("attendanceTimes"))
             ),
             "report_time": normalize_time_text(raw.get("report_time", raw.get("reportTime"))),
+            "shift_time_branch_row_id": _normalize_site_branch_row_id(
+                raw.get("shift_time_branch_row_id", raw.get("shiftTimeBranchRowId", ""))
+            ),
             "sync_source_type": _normalize_sync_text(raw.get("sync_source_type", raw.get("syncSourceType", "")), limit=40),
             "sync_source_project_id": _normalize_sync_text(raw.get("sync_source_project_id", raw.get("syncSourceProjectId", "")), limit=80),
             "sync_source_project_title": _normalize_sync_text(raw.get("sync_source_project_title", raw.get("syncSourceProjectTitle", "")), limit=120),
@@ -425,6 +430,7 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         "show_report_time": False,
         "attendance_times": [],
         "report_time": "",
+        "shift_time_branch_row_id": "",
         "sync_source_type": "",
         "sync_source_project_id": "",
         "sync_source_project_title": "",
@@ -579,6 +585,15 @@ def serialize_entry_rows(
                 )
             if entry.get("report_time"):
                 shift_time_rows.append([REPORT_TIME_ROW_PREFIX, day, index, entry["report_time"]])
+            if entry.get("shift_time_branch_row_id"):
+                shift_time_rows.append(
+                    [
+                        SHIFT_TIME_BRANCH_ROW_ID_ROW_PREFIX,
+                        day,
+                        index,
+                        entry["shift_time_branch_row_id"],
+                    ]
+                )
             if entry.get("substitute_request_type"):
                 substitute_rows.append([SUBSTITUTE_REQUEST_TYPE_ROW_PREFIX, day, index, entry["substitute_request_type"]])
             if entry.get("substitute_helper_employee_name"):
@@ -708,6 +723,7 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         SHOW_REPORT_TIME_ROW_PREFIX,
         ATTENDANCE_TIMES_ROW_PREFIX,
         REPORT_TIME_ROW_PREFIX,
+        SHIFT_TIME_BRANCH_ROW_ID_ROW_PREFIX,
     }
     substitute_row_prefixes = {
         SUBSTITUTE_REQUEST_TYPE_ROW_PREFIX,
@@ -903,6 +919,10 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         SHOW_REPORT_TIME_ROW_PREFIX: ("show_report_time", _normalize_bool),
         ATTENDANCE_TIMES_ROW_PREFIX: ("attendance_times", normalize_attendance_times),
         REPORT_TIME_ROW_PREFIX: ("report_time", normalize_time_text),
+        SHIFT_TIME_BRANCH_ROW_ID_ROW_PREFIX: (
+            "shift_time_branch_row_id",
+            _normalize_site_branch_row_id,
+        ),
     }
     for row in shift_time_rows:
         if len(row) < 4:
