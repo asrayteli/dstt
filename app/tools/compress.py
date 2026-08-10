@@ -34,6 +34,16 @@ from app.services.compress_service import (
 
 compress_bp = Blueprint("compress", __name__, url_prefix="/tools/compress")
 
+# 通常のリクエスト上限は小さく保ちつつ、このツールが従来から正式に対応している
+# 合計1GiBの圧縮だけは維持する。multipart 境界やファイル名などの余裕を64MiB取る。
+COMPRESS_REQUEST_LIMIT = MAX_TOTAL_SIZE + 64 * 1024 * 1024
+
+
+@compress_bp.before_request
+def _allow_documented_compress_upload_size():
+    if request.method == "POST" and request.endpoint == "compress.compress_tool":
+        request.max_content_length = COMPRESS_REQUEST_LIMIT
+
 
 @compress_bp.route("/", methods=["GET", "POST"])
 @login_required

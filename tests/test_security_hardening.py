@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import types
 from pathlib import Path
@@ -107,6 +108,25 @@ def test_legacy_admin_requires_explicit_migration_opt_in(tmp_path, monkeypatch):
         db.session.add(user)
         db.session.commit()
         assert is_admin_user(user) is True
+
+
+def test_legacy_admin_flag_migration_is_disabled_without_opt_in(app_ctx):
+    from app.access_control import ensure_legacy_admin_flag
+    from app.models import User, db
+
+    with app_ctx.app_context():
+        user = User(username="3243012", password_hash="hash", name="Legacy", is_admin=False)
+        db.session.add(user)
+        db.session.commit()
+
+        ensure_legacy_admin_flag()
+        db.session.refresh(user)
+        assert user.is_admin is False
+
+        app_ctx.config["ENABLE_LEGACY_ADMIN"] = True
+        ensure_legacy_admin_flag()
+        db.session.refresh(user)
+        assert user.is_admin is True
 
 
 def test_register_route_disabled_by_default(app_ctx):
@@ -217,6 +237,12 @@ def test_sqlite_database_and_sidecars_are_owner_only(tmp_path, monkeypatch):
         db.session.execute(db.text("SELECT 1"))
         db.session.commit()
 
+    if os.name == "nt":
+        # Windows の os.chmod は POSIX の所有者専用ACLを表現しない。実データは
+        # サービスアカウント専用ディレクトリのNTFS ACLで保護する。
+        assert db_path.exists()
+        return
+
     assert db_path.stat().st_mode & 0o777 == 0o600
     for suffix in ("-wal", "-shm"):
         sidecar = Path(f"{db_path}{suffix}")
@@ -264,6 +290,24 @@ def test_forwarded_headers_are_not_trusted_by_default(app_ctx):
     assert "Strict-Transport-Security" not in response.headers
 
 
+def test_forwarded_proto_can_be_trusted_explicitly(tmp_path, monkeypatch):
+    _stub_optional_deps()
+    monkeypatch.setenv("DSTT_PROXY_X_PROTO", "1")
+    from app import create_app
+
+    app = create_app({
+        "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'proxy.db'}",
+        "SECRET_KEY": "test-secret",
+        "TESTING": True,
+    })
+    response = app.test_client().get(
+        "/auth/login",
+        headers={"X-Forwarded-Proto": "https"},
+    )
+
+    assert response.headers.get("Strict-Transport-Security") == "max-age=31536000"
+
+
 def test_authenticated_responses_are_not_cached(app_ctx):
     from app.models import User, db
     from werkzeug.security import generate_password_hash
@@ -276,6 +320,36 @@ def test_authenticated_responses_are_not_cached(app_ctx):
     response = client.get("/")
     assert response.headers["Cache-Control"] == "no-store, private"
     assert "geolocation=()" in response.headers["Permissions-Policy"]
+
+
+def test_authenticated_static_assets_keep_normal_cache_behavior(app_ctx):
+    from app.models import User, db
+    from werkzeug.security import generate_password_hash
+
+    with app_ctx.app_context():
+        db.session.add(User(username="static-user", password_hash=generate_password_hash("password")))
+        db.session.commit()
+    client = app_ctx.test_client()
+    client.post("/auth/login", data={"username": "static-user", "password": "password"})
+
+    response = client.get("/static/site.webmanifest")
+
+    assert response.status_code == 200
+    assert "no-store" not in response.headers.get("Cache-Control", "")
+
+
+def test_compress_upload_keeps_its_documented_one_gib_limit(app_ctx):
+    from flask import request
+    from app.tools.compress import (
+        COMPRESS_REQUEST_LIMIT,
+        _allow_documented_compress_upload_size,
+    )
+
+    assert app_ctx.config["MAX_CONTENT_LENGTH"] == 256 * 1024 * 1024
+    with app_ctx.test_request_context("/tools/compress/", method="POST"):
+        _allow_documented_compress_upload_size()
+        assert request.max_content_length == COMPRESS_REQUEST_LIMIT
+        assert request.max_content_length > 1024 * 1024 * 1024
 
 
 def test_max_content_length_default(app_ctx):

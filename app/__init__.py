@@ -1151,16 +1151,22 @@ def create_app(test_config=None):
             "Permissions-Policy",
             "camera=(self), microphone=(), geolocation=(), payment=(), usb=()",
         )
+        from flask import request as _security_request
+
         # 認証済み画面・APIには個人情報が含まれ得るため、共有端末のブラウザや
-        # 中間キャッシュへ残さない。個別ルートのより厳格な指定は維持する。
+        # 中間キャッシュへ残さない。静的CSS/JS/画像まで no-store にすると表示速度と
+        # PWAキャッシュを損なうため除外し、個別ルートのより厳格な指定は維持する。
         from flask_login import current_user as _header_user
-        if getattr(_header_user, "is_authenticated", False):
+        if (
+            getattr(_header_user, "is_authenticated", False)
+            and _security_request.endpoint != "static"
+            and not (_security_request.path or "").startswith("/static/")
+        ):
             response.headers.setdefault("Cache-Control", "no-store, private")
         # HTTPS で届いたリクエスト（ProxyFix 経由の X-Forwarded-Proto 含む）にのみ
         # HSTS を付与し、以後の平文アクセスへの格下げを防ぐ。HTTP 併用ホストへは
         # 影響しない。不要なら DSTT_ENABLE_HSTS=0 で無効化できる。
-        from flask import request as _hsts_req
-        if _hsts_enabled and _hsts_req.is_secure:
+        if _hsts_enabled and _security_request.is_secure:
             response.headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000"
             )

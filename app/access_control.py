@@ -107,7 +107,14 @@ def is_admin_user(user=None) -> bool:
 
 
 def ensure_legacy_admin_flag() -> None:
-    """既存DBの `3243012` を `is_admin=True` に自動昇格させる。"""
+    """明示的な移行期間だけ旧管理者IDを ``is_admin=True`` にする。
+
+    この関数は起動時に毎回呼ばれるため、設定を確認せずに昇格すると、通常権限で
+    作成された同名アカウントが次回起動時に管理者になる。既存環境の移行が必要な
+    場合に限り ``DSTT_ENABLE_LEGACY_ADMIN=1`` を設定する。
+    """
+    if not current_app.config.get("ENABLE_LEGACY_ADMIN", False):
+        return
     user = User.query.filter_by(username=LEGACY_ADMIN_USERNAME).first()
     if user and not user.is_admin:
         user.is_admin = True
