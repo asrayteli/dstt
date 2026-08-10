@@ -49,6 +49,14 @@ def _is_origin_allowed() -> bool:
     if method in SAFE_METHODS:
         return True
 
+    # Fetch Metadata cannot be set by page JavaScript.  Check it before the
+    # legacy Origin/Referer fallback so privacy software stripping those two
+    # headers cannot turn an explicitly cross-site browser request into an
+    # allowed headerless request.
+    fetch_site = (request.headers.get("Sec-Fetch-Site") or "").strip().lower()
+    if fetch_site == "cross-site":
+        return False
+
     origin_raw = request.headers.get("Origin")
     # sandboxed iframe や data: URL 由来のリクエストは "Origin: null" を送る。
     # netloc が取れず「未設定」と同じ扱いになると素通りしてしまうため、

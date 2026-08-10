@@ -78,7 +78,7 @@ def _create_user(username: str, *, password: str = "secret", is_admin: bool = Fa
     return user
 
 
-def test_successful_login_records_dstt_login_log(app_ctx):
+def test_successful_login_ignores_untrusted_forwarded_ip(app_ctx):
     from app.models import DsttLoginLog
 
     with app_ctx.app_context():
@@ -99,12 +99,12 @@ def test_successful_login_records_dstt_login_log(app_ctx):
         assert len(logs) == 1
         assert logs[0].username == "alice"
         assert logs[0].name == "Alice"
-        assert logs[0].ip_address == "203.0.113.10"
+        assert logs[0].ip_address == "127.0.0.1"
         assert logs[0].user_agent == "pytest-browser"
         assert before_jst <= logs[0].logged_in_at <= after_jst
 
 
-def test_failed_login_shows_message_and_records_forwarded_ip(app_ctx):
+def test_failed_login_shows_message_and_ignores_untrusted_forwarded_ip(app_ctx):
     from app.models import UserLoginLog
 
     with app_ctx.app_context():
@@ -121,7 +121,7 @@ def test_failed_login_shows_message_and_records_forwarded_ip(app_ctx):
     assert "ユーザー名またはパスワードが正しくありません".encode("utf-8") in response.data
     with app_ctx.app_context():
         log = UserLoginLog.query.filter_by(username="alice", success=False).one()
-        assert log.ip_address == "198.51.100.7"
+        assert log.ip_address == "127.0.0.1"
         assert log.user_agent == "pytest-browser"
 
 

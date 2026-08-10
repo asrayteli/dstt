@@ -2,6 +2,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from sqlalchemy import event, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -9,7 +10,7 @@ import os
 import secrets
 import time
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from .navigation import NAV_ITEMS
 from .versioning import calculate_repo_version
@@ -107,11 +108,28 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_nonnegative_int(name: str, default: int = 0) -> int:
+    """Return a safe ProxyFix hop count from the environment.
+
+    Forwarded headers are attacker-controlled when the application is reachable
+    without the expected reverse proxy, so invalid and negative values fail
+    closed to zero trusted hops.
+    """
+    try:
+        return max(0, int(os.environ.get(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
 def _load_or_create_local_secret(app: Flask) -> str:
     secret_path = Path(app.instance_path) / "secret_key"
     if secret_path.exists():
         secret_key = secret_path.read_text(encoding="utf-8").strip()
         if secret_key:
+            try:
+                os.chmod(secret_path, 0o600)
+            except OSError:
+                pass
             return secret_key
 
     secret_path.parent.mkdir(parents=True, exist_ok=True)
@@ -252,6 +270,53 @@ def _configure_sqlite_engine(app) -> None:
     # リスナー登録前にプールへ入った接続にも PRAGMA が効くよう作り直す。
     # ここはまだスキーマ初期化前（最初のクエリ実行前）なので安全。
     engine.dispose()
+
+
+def _sqlite_database_path(app: Flask) -> Path | None:
+    """SQLite の実ファイルパスを返す（メモリDB・他DBでは ``None``）。"""
+    try:
+        url = make_url(str(app.config.get("SQLALCHEMY_DATABASE_URI", "")))
+    except Exception:
+        return None
+    if url.get_backend_name() != "sqlite" or not url.database or url.database == ":memory:":
+        return None
+    path = Path(url.database)
+    if not path.is_absolute():
+        # Flask-SQLAlchemy 3 は相対 SQLite URI を instance_path 基準で解決する。
+        path = Path(app.instance_path) / path
+    return path.resolve()
+
+
+def _harden_sqlite_files(app: Flask) -> None:
+    """社員情報を含む SQLite 本体・WAL・SHM を所有者限定にする。"""
+    db_path = _sqlite_database_path(app)
+    if db_path is None:
+        return
+
+    static_path = Path(app.static_folder).resolve()
+    try:
+        db_path.relative_to(static_path)
+    except ValueError:
+        pass
+    else:
+        raise RuntimeError("SQLite DB を static 配下へ配置することはできません")
+
+    # 既定の instance 配下だけディレクトリ自体も閉じる。利用者が明示した外部
+    # ディレクトリの権限をアプリが勝手に変更することは避ける。
+    instance_path = Path(app.instance_path).resolve()
+    try:
+        db_path.relative_to(instance_path)
+        instance_path.mkdir(parents=True, exist_ok=True)
+        os.chmod(instance_path, 0o700)
+    except (ValueError, OSError):
+        pass
+
+    for candidate in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        if candidate.exists():
+            try:
+                os.chmod(candidate, 0o600)
+            except OSError:
+                app.logger.warning("DBファイル権限を0600へ変更できません: %s", candidate)
 
 
 @contextmanager
@@ -715,13 +780,15 @@ def create_app(test_config=None):
     app.config['SECRET_KEY'] = _resolve_secret_key(app, test_config)
     app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_uri(test_config)
     app.config['ALLOW_SELF_REGISTRATION'] = _env_bool('DSTT_ALLOW_SELF_REGISTRATION', False)
+    app.config['ENABLE_LEGACY_ADMIN'] = _env_bool('DSTT_ENABLE_LEGACY_ADMIN', False)
     # リクエストボディの全体上限（未設定だと無制限で、巨大ボディ送信による
     # ディスク/メモリ枯渇の DoS が可能）。FILE POST の1リクエスト最大
-    # （10GiB + チャンク余裕）を既定とし、環境変数で調整・0で無効化できる。
+    # を既定とし、環境変数で調整・0で無効化できる。大容量の FILE POST は
+    # チャンク API を使うため、単一リクエストに 10GiB を許可する必要はない。
     try:
-        _max_content_mb = int(os.environ.get('DSTT_MAX_CONTENT_LENGTH_MB', str(10 * 1024 + 64)))
+        _max_content_mb = int(os.environ.get('DSTT_MAX_CONTENT_LENGTH_MB', '256'))
     except ValueError:
-        _max_content_mb = 10 * 1024 + 64
+        _max_content_mb = 256
     if _max_content_mb > 0:
         app.config['MAX_CONTENT_LENGTH'] = _max_content_mb * 1024 * 1024
     app.config['LOGIN_FAILURE_WINDOW_SECONDS'] = int(os.environ.get('DSTT_LOGIN_FAILURE_WINDOW_SECONDS', '300'))
@@ -736,14 +803,35 @@ def create_app(test_config=None):
     app.config['REMEMBER_COOKIE_HTTPONLY'] = True
     app.config['REMEMBER_COOKIE_SAMESITE'] = os.environ.get('DSTT_REMEMBER_COOKIE_SAMESITE', 'Lax')
     app.config['REMEMBER_COOKIE_SECURE'] = app.config['SESSION_COOKIE_SECURE']
+    app.config['REMEMBER_COOKIE_DURATION'] = timedelta(
+        days=_env_nonnegative_int('DSTT_REMEMBER_COOKIE_DAYS', 14)
+    )
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(
+        hours=_env_nonnegative_int('DSTT_SESSION_LIFETIME_HOURS', 12)
+    )
     if test_config:
         app.config.update(test_config)
+    # 接続前に危険な公開領域へのDB配置を拒否する。ファイルがまだ無い場合でも
+    # パス検査は可能であり、static 配下へDB/WALを一瞬でも作らない。
+    _harden_sqlite_files(app)
     db.init_app(app)
     _configure_sqlite_engine(app)
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"  # ログインページのエンドポイント
     login_manager.login_message = None
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1)
+    # Forwarded headers must never be trusted merely because they are present.
+    # Deployments behind a trusted reverse proxy opt in with hop counts; direct
+    # deployments retain the WSGI server's peer/host/scheme values.
+    proxy_x_for = _env_nonnegative_int('DSTT_PROXY_X_FOR')
+    proxy_x_proto = _env_nonnegative_int('DSTT_PROXY_X_PROTO')
+    proxy_x_host = _env_nonnegative_int('DSTT_PROXY_X_HOST')
+    if proxy_x_for or proxy_x_proto or proxy_x_host:
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=proxy_x_for,
+            x_proto=proxy_x_proto,
+            x_host=proxy_x_host,
+        )
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -1059,6 +1147,15 @@ def create_app(test_config=None):
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         # URL に共有トークンを含むツールがあるため、外部遷移時の Referer 漏洩を抑える。
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(self), microphone=(), geolocation=(), payment=(), usb=()",
+        )
+        # 認証済み画面・APIには個人情報が含まれ得るため、共有端末のブラウザや
+        # 中間キャッシュへ残さない。個別ルートのより厳格な指定は維持する。
+        from flask_login import current_user as _header_user
+        if getattr(_header_user, "is_authenticated", False):
+            response.headers.setdefault("Cache-Control", "no-store, private")
         # HTTPS で届いたリクエスト（ProxyFix 経由の X-Forwarded-Proto 含む）にのみ
         # HSTS を付与し、以後の平文アクセスへの格下げを防ぐ。HTTP 併用ホストへは
         # 影響しない。不要なら DSTT_ENABLE_HSTS=0 で無効化できる。
@@ -1125,6 +1222,7 @@ def create_app(test_config=None):
         _ensure_to_bell_task_source_unique_index(app)
         # 旧データの空 draft を live へ揃える一括修復（誤『仮保存あり』の永続的解消）。
         _backfill_empty_cloudshift_drafts(app)
+        _harden_sqlite_files(app)
 
     from .services.to_bell_push import init_to_bell_push_scheduler
     init_to_bell_push_scheduler(app)

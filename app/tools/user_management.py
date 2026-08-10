@@ -27,6 +27,7 @@ from app.models import (
 )
 from app.services import mail_service
 from app.services import mail_inbox
+from app.security.password_policy import password_policy_error
 from app.access_control import (
     _user_satisfies_group_rule,
     is_admin_user,
@@ -205,6 +206,8 @@ def create_user():
         return jsonify({"error": "日本語名は空にできません"}), 400
     if not password:
         return jsonify({"error": "パスワードは空にできません"}), 400
+    if error := password_policy_error(password, username=username):
+        return jsonify({"error": error}), 400
     if not re.match(r'^[a-zA-Z0-9]+$', username):
         return jsonify({"error": "ユーザーIDは英数字のみ使用可能です"}), 400
     if User.query.filter_by(username=username).first():
@@ -281,6 +284,8 @@ def change_password(user_id):
         new_password = generate_random_password()
     if not new_password:
         return jsonify({"error": "パスワードは空にできません"}), 400
+    if error := password_policy_error(new_password, username=user.username):
+        return jsonify({"error": error}), 400
 
     try:
         user.password_hash = generate_password_hash(new_password)
@@ -2044,6 +2049,8 @@ def bulk_import_users():
             errors.append("ファイル内でユーザーIDが重複しています")
         if not name:
             errors.append("日本語名が空です")
+        if password and (error := password_policy_error(password, username=username)):
+            errors.append(error)
 
         branch = office = dept = None
         if office_name and not branch_name:

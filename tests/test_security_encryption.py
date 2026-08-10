@@ -361,6 +361,26 @@ def test_same_origin_check_blocks_cross_origin_post(tmp_path, monkeypatch):
     assert resp.status_code == 403
 
 
+def test_fetch_metadata_blocks_cross_site_without_origin(tmp_path, monkeypatch):
+    """Origin が除去されてもブラウザが cross-site と明示した要求は拒否する。"""
+    _stub_optional_deps()
+    monkeypatch.chdir(tmp_path)
+    from app import create_app
+
+    app = create_app({
+        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "SECRET_KEY": "test",
+        "TESTING": True,
+        "DSTT_ENFORCE_SAME_ORIGIN_IN_TESTS": True,
+    })
+    response = app.test_client().post(
+        "/auth/login",
+        data={"username": "nobody", "password": "wrong"},
+        headers={"Sec-Fetch-Site": "cross-site"},
+    )
+    assert response.status_code == 403
+
+
 def test_same_origin_check_allows_same_origin_post(tmp_path, monkeypatch):
     _stub_optional_deps()
     monkeypatch.delenv("DSTT_DATA_ENCRYPTION_KEY_B64", raising=False)

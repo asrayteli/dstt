@@ -17,7 +17,7 @@ from __future__ import annotations
 from functools import wraps
 from typing import Iterable
 
-from flask import abort, jsonify, redirect, request, url_for
+from flask import abort, current_app, jsonify, redirect, request, url_for
 from flask_login import current_user
 
 from .models import (
@@ -89,7 +89,10 @@ def tool_requires_permission(tool_key: str) -> bool:
 # ------------------------------------------------------------------
 
 def is_legacy_admin_username(username) -> bool:
-    return str(username or "").strip() == LEGACY_ADMIN_USERNAME
+    # 固定IDだけで管理者になれる挙動は、IDを知る攻撃者がそのアカウントを
+    # 作成・奪取した場合の権限昇格になる。移行期間だけ明示的に opt-in する。
+    enabled = bool(current_app.config.get("ENABLE_LEGACY_ADMIN", False))
+    return enabled and str(username or "").strip() == LEGACY_ADMIN_USERNAME
 
 
 def is_admin_user(user=None) -> bool:
