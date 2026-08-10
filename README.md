@@ -29,13 +29,31 @@ python run.py
 - `DSTT_DATABASE_URI`: SQLAlchemy の DB URI
 - `DSTT_ALLOW_SELF_REGISTRATION`: 自己登録の許可
 - `DSTT_SESSION_COOKIE_SECURE`: Secure Cookie の有効化
+- `DSTT_REMEMBER_COOKIE_DAYS`: 「ログイン状態を保持」の有効日数（既定 `14`）
+- `DSTT_SESSION_LIFETIME_HOURS`: permanent session の有効時間（既定 `12`）
+- `DSTT_PROXY_X_FOR` / `DSTT_PROXY_X_PROTO` / `DSTT_PROXY_X_HOST`: 信頼するリバースプロキシの hop 数（既定 `0`＝転送ヘッダーを信頼しない）
+- `DSTT_ENABLE_LEGACY_ADMIN`: 旧固定管理者IDを移行する間だけ `1` にする互換設定（通常運用では未設定）
 - `DSTT_DATA_ENCRYPTION_KEY`: 暗号化対象データ用キー
 - `DSTT_GOOGLE_CLIENT_ID` / `DSTT_GOOGLE_CLIENT_SECRET`: ToBell の Google カレンダー連携用 OAuth クライアント情報
 - `DSTT_TIMEZONE`: カレンダー連携で使うタイムゾーン（既定 `Asia/Tokyo`）
-- `DSTT_MAX_CONTENT_LENGTH_MB`: リクエストボディ上限（MB）。既定は FILE POST の1リクエスト最大に合わせた `10304`（≒10GiB+余裕）。`0` で無制限
+- `DSTT_MAX_CONTENT_LENGTH_MB`: 通常のリクエストボディ上限（MB、既定 `256`）。`0` で無制限。圧縮ツールだけは既存仕様を維持するため合計1GiB＋multipart余裕を個別に許可
 - `DSTT_ACTIVITY_LOG_RETENTION_DAYS`: ツール利用ログ（user_activity_logs）の保持日数。設定すると日次で期限切れ行を削除。未設定/`0` は無制限保持
 - `DSTT_ENABLE_HSTS`: HTTPS応答への Strict-Transport-Security 付与（既定有効。`0` で無効）
 - `DSTT_GUNICORN_WORKERS`: gunicorn のワーカー数。未設定なら `min(CPU数 + 1, 9)`（最低2）
+
+### リバースプロキシ構成
+
+`X-Forwarded-*` は既定では信頼しません。TLS終端プロキシからGunicornへ接続する一般的な
+1段構成では、アプリポートをそのプロキシだけに制限した上で、次を設定してください。
+
+```powershell
+$env:DSTT_PROXY_X_FOR = "1"
+$env:DSTT_PROXY_X_PROTO = "1"
+$env:DSTT_PROXY_X_HOST = "1"
+```
+
+プロキシが複数段なら、各値は実際に信頼する段数へ合わせます。過大な値はクライアントが
+付けた転送ヘッダーを信頼する原因になるため設定しないでください。
 
 ### ワーカー数とメモリ
 

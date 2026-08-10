@@ -6,6 +6,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .models import DsttLoginLog, User, UserLoginLog, db
+from .security.password_policy import password_policy_error
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
@@ -188,6 +189,8 @@ def register():
             flash("入力内容に誤りがあります", "error")
         elif User.query.filter_by(username=username).first():
             flash("このユーザー名は既に使われています", "error")
+        elif error := password_policy_error(password, username=username):
+            flash(error, "error")
         else:
             new_user = User(
                 username=username,

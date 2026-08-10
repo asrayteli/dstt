@@ -17,7 +17,7 @@ from __future__ import annotations
 from functools import wraps
 from typing import Iterable
 
-from flask import abort, jsonify, redirect, request, url_for
+from flask import abort, current_app, jsonify, redirect, request, url_for
 from flask_login import current_user
 
 from .models import (
@@ -89,7 +89,10 @@ def tool_requires_permission(tool_key: str) -> bool:
 # ------------------------------------------------------------------
 
 def is_legacy_admin_username(username) -> bool:
-    return str(username or "").strip() == LEGACY_ADMIN_USERNAME
+    # 固定IDだけで管理者になれる挙動は、IDを知る攻撃者がそのアカウントを
+    # 作成・奪取した場合の権限昇格になる。移行期間だけ明示的に opt-in する。
+    enabled = bool(current_app.config.get("ENABLE_LEGACY_ADMIN", False))
+    return enabled and str(username or "").strip() == LEGACY_ADMIN_USERNAME
 
 
 def is_admin_user(user=None) -> bool:
@@ -104,7 +107,14 @@ def is_admin_user(user=None) -> bool:
 
 
 def ensure_legacy_admin_flag() -> None:
-    """既存DBの `3243012` を `is_admin=True` に自動昇格させる。"""
+    """明示的な移行期間だけ旧管理者IDを ``is_admin=True`` にする。
+
+    この関数は起動時に毎回呼ばれるため、設定を確認せずに昇格すると、通常権限で
+    作成された同名アカウントが次回起動時に管理者になる。既存環境の移行が必要な
+    場合に限り ``DSTT_ENABLE_LEGACY_ADMIN=1`` を設定する。
+    """
+    if not current_app.config.get("ENABLE_LEGACY_ADMIN", False):
+        return
     user = User.query.filter_by(username=LEGACY_ADMIN_USERNAME).first()
     if user and not user.is_admin:
         user.is_admin = True

@@ -1,18 +1,18 @@
 import argparse
-import os
 from getpass import getpass
 from app import create_app
 from app.models import db, User
 from werkzeug.security import generate_password_hash
+from app.security.password_policy import password_policy_error
 
 def main():
     parser = argparse.ArgumentParser(description="Create a DSTT user.")
     parser.add_argument("--admin", action="store_true", help="Create the user with admin privileges.")
     args = parser.parse_args()
 
-    app = create_app({
-        "SECRET_KEY": os.environ.get("DSTT_SECRET_KEY", "cli-bootstrap-secret"),
-    })
+    # create_app に既知の固定鍵を渡さない。環境変数または権限 0600 の
+    # instance/secret_key を通常の起動と同じ方法で利用する。
+    app = create_app()
     with app.app_context():
         print("=== DSTT ユーザー追加ツール ===")
         
@@ -53,6 +53,8 @@ def main():
                 print("❌ パスワードは空にできません。")
             elif password != confirm:
                 print("❌ パスワードが一致しません。もう一度入力してください。")
+            elif error := password_policy_error(password, username=username):
+                print(f"❌ {error}")
             else:
                 break
 
