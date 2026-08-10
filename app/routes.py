@@ -11,6 +11,19 @@ from .manuals import get_manual
 main = Blueprint("main", __name__)
 
 
+@main.route("/about")
+def about():
+    """ログインなしで、フィルタリング製品にもサイトの用途を明示する。"""
+    return render_template("about.html")
+
+
+@main.route("/robots.txt")
+def robots():
+    # 認証領域の巡回は避けつつ、サイト分類に必要な公開情報は参照可能にする。
+    body = "User-agent: *\nAllow: /about\nAllow: /auth/login\nDisallow: /\n"
+    return current_app.response_class(body, mimetype="text/plain")
+
+
 @main.route("/")
 @login_required
 def index():

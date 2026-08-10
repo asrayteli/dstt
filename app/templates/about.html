@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="DSTT (DaishintoTools) は、社内業務を支援する認証制のWebアプリケーションです。">
+  <meta name="robots" content="index,follow">
+  <title>DSTT - サイト情報</title>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "DSTT (DaishintoTools)",
+      "applicationCategory": "BusinessApplication",
+      "description": "An authenticated internal business productivity application for document processing, scheduling, and operational support.",
+      "inLanguage": "ja"
+    }
+  </script>
+  <style>
+    body { margin: 0; background: #f4f6f8; color: #1f2937; font-family: sans-serif; line-height: 1.7; }
+    main { box-sizing: border-box; max-width: 760px; min-height: 100vh; margin: auto; padding: 64px 24px; }
+    article { padding: 36px; border: 1px solid #dbe2e8; border-radius: 12px; background: #fff; }
+    h1 { margin-top: 0; color: #0b5cab; }
+    dt { margin-top: 16px; font-weight: 700; }
+    dd { margin-left: 0; }
+    a { color: #0868b7; }
+  </style>
+</head>
+<body>
+  <main>
+    <article>
+      <h1>DSTT (DaishintoTools)</h1>
+      <p>DSTTは、文書・画像処理、勤務表、社内名簿などの業務を支援する、利用者認証付きの社内向けWebアプリケーションです。</p>
+      <dl>
+        <dt>サイト分類</dt>
+        <dd>Business and Economy / Web-based Applications / Productivity Tools</dd>
+        <dt>提供機能</dt>
+        <dd>社内業務用のファイル処理、PDF・画像編集、シフト管理、料金計算など。</dd>
+        <dt>通信の性質</dt>
+        <dd>第三者サイトへの通信を中継したり、利用者の接続元を秘匿したりするサービスではありません。</dd>
+        <dt>アクセス</dt>
+        <dd>業務データと各機能の利用にはログインが必要です。</dd>
+      </dl>
+      <p><a href="{{ url_for('auth.login') }}">ログイン画面へ</a></p>
+    </article>
+  </main>
+</body>
+</html>
