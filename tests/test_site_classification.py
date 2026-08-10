@@ -28,8 +28,15 @@ def test_about_page_is_public_and_describes_business_purpose(app):
     response = client.get("/about")
 
     assert response.status_code == 200
-    assert "BusinessApplication" in response.get_data(as_text=True)
-    assert "社内向けWebアプリケーション" in response.get_data(as_text=True)
+    page = response.get_data(as_text=True)
+    assert "BusinessApplication" in page
+    assert "PDF編集" in page
+    assert "CSV編集" in page
+    assert "ページの並べ替え、結合、分割" in page
+    assert "表のセル・行・列の編集" in page
+    assert "ファイル処理" not in page
+    assert "document processing" not in page
+    assert "通信を中継" not in page
 
 
 def test_robots_exposes_only_public_classification_pages(app):
