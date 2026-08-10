@@ -32,6 +32,8 @@ python run.py
 - `DSTT_REMEMBER_COOKIE_DAYS`: 「ログイン状態を保持」の有効日数（既定 `14`）
 - `DSTT_SESSION_LIFETIME_HOURS`: permanent session の有効時間（既定 `12`）
 - `DSTT_PROXY_X_FOR` / `DSTT_PROXY_X_PROTO` / `DSTT_PROXY_X_HOST`: 信頼するリバースプロキシの hop 数（既定 `0`＝転送ヘッダーを信頼しない）
+- `DSTT_TRUSTED_HOSTS`: 正式なHost名のカンマ区切り許可リスト（例 `dstt.example.jp,.internal.example.jp`）。未設定時はHost制限なし
+- `DSTT_LOGIN_FAILURE_MAX_ATTEMPTS`: 同一IP・ユーザーIDのログイン失敗上限（既定 `10`、既定の判定期間は5分、`0`で無効）
 - `DSTT_ENABLE_LEGACY_ADMIN`: 旧固定管理者IDを移行する間だけ `1` にする互換設定（通常運用では未設定）
 - `DSTT_DATA_ENCRYPTION_KEY`: 暗号化対象データ用キー
 - `DSTT_GOOGLE_CLIENT_ID` / `DSTT_GOOGLE_CLIENT_SECRET`: ToBell の Google カレンダー連携用 OAuth クライアント情報
@@ -50,6 +52,7 @@ python run.py
 $env:DSTT_PROXY_X_FOR = "1"
 $env:DSTT_PROXY_X_PROTO = "1"
 $env:DSTT_PROXY_X_HOST = "1"
+$env:DSTT_TRUSTED_HOSTS = "dstt.example.jp"
 ```
 
 プロキシが複数段なら、各値は実際に信頼する段数へ合わせます。過大な値はクライアントが

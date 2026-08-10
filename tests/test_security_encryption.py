@@ -381,6 +381,26 @@ def test_fetch_metadata_blocks_cross_site_without_origin(tmp_path, monkeypatch):
     assert response.status_code == 403
 
 
+def test_fetch_metadata_blocks_same_site_sibling_without_origin(tmp_path, monkeypatch):
+    """Cookie を共有し得る兄弟サブドメインからの headerless POST も拒否する。"""
+    _stub_optional_deps()
+    monkeypatch.chdir(tmp_path)
+    from app import create_app
+
+    app = create_app({
+        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "SECRET_KEY": "test",
+        "TESTING": True,
+        "DSTT_ENFORCE_SAME_ORIGIN_IN_TESTS": True,
+    })
+    response = app.test_client().post(
+        "/auth/login",
+        data={"username": "nobody", "password": "wrong"},
+        headers={"Sec-Fetch-Site": "same-site"},
+    )
+    assert response.status_code == 403
+
+
 def test_same_origin_check_allows_same_origin_post(tmp_path, monkeypatch):
     _stub_optional_deps()
     monkeypatch.delenv("DSTT_DATA_ENCRYPTION_KEY_B64", raising=False)

@@ -72,6 +72,11 @@ def _is_origin_allowed() -> bool:
         return origin_host == expected
     if referer_host is not None:
         return referer_host == expected
+    # 同一サイトの別サブドメインは Cookie を送信できるが、同一オリジンではない。
+    # Origin/Referer が除去されていても Fetch Metadata が same-site と明示した
+    # ブラウザ要求は拒否し、兄弟サブドメイン経由の CSRF を防ぐ。
+    if fetch_site == "same-site":
+        return False
     # 両方未設定: 同一サーバ上のスクリプトからの呼出しなど、従来の正規利用を壊さない
     return True
 

@@ -125,6 +125,64 @@ def test_failed_login_shows_message_and_ignores_untrusted_forwarded_ip(app_ctx):
         assert log.user_agent == "pytest-browser"
 
 
+def test_unknown_user_runs_dummy_password_verification(app_ctx, monkeypatch):
+    import app.auth as auth_module
+
+    calls = []
+    original = auth_module.check_password_hash
+
+    def tracking_check(password_hash, password):
+        calls.append((password_hash, password))
+        return original(password_hash, password)
+
+    monkeypatch.setattr(auth_module, "check_password_hash", tracking_check)
+    response = app_ctx.test_client().post(
+        "/auth/login",
+        data={"username": "does-not-exist", "password": "wrong"},
+    )
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+
+
+def test_shared_login_rate_limit_uses_database_audit_log(app_ctx):
+    with app_ctx.app_context():
+        _create_user("alice", password="correct-password", name="Alice")
+    app_ctx.config["LOGIN_FAILURE_MAX_ATTEMPTS"] = 2
+    app_ctx.config["LOGIN_FAILURE_WINDOW_SECONDS"] = 300
+
+    first_worker = app_ctx.test_client()
+    second_worker = app_ctx.test_client()
+    for _ in range(2):
+        response = first_worker.post(
+            "/auth/login",
+            data={"username": "alice", "password": "wrong"},
+        )
+        assert response.status_code == 200
+
+    blocked = second_worker.post(
+        "/auth/login",
+        data={"username": "alice", "password": "correct-password"},
+    )
+    assert blocked.status_code == 429
+    assert blocked.headers["Retry-After"] == "300"
+
+
+def test_oversized_login_input_is_rejected_without_error(app_ctx):
+    response = app_ctx.test_client().post(
+        "/auth/login",
+        data={"username": "u" * 1000, "password": "p" * 5000},
+    )
+
+    assert response.status_code == 200
+    assert "ユーザー名またはパスワードが正しくありません".encode("utf-8") in response.data
+
+    from app.models import UserLoginLog
+    with app_ctx.app_context():
+        log = UserLoginLog.query.filter_by(success=False).one()
+        assert len(log.username) == 80
+
+
 def test_login_redirects_to_safe_next_url(app_ctx):
     with app_ctx.app_context():
         _create_user("alice", name="Alice")
