@@ -26,11 +26,7 @@ git fetch origin
 git merge --ff-only "$target"
 "$venv/bin/python" -m pip install --disable-pip-version-check -r requirements.txt
 "$venv/bin/python" -m compileall -q app scripts
-"$venv/bin/python" -m pytest -q \
-    tests/test_health_endpoints.py \
-    tests/test_postgres_readiness.py \
-    tests/test_runtime_paths.py \
-    tests/test_static_data_protection.py
+"$venv/bin/python" scripts/predeploy_check.py
 
 pidfile=/home/asray/.local/run/dstt.pid
 if [[ ! -s "$pidfile" ]]; then
