@@ -67,21 +67,14 @@ It refuses orphan data unless `--skip-orphans` is explicitly supplied.
 
 ## Root-owned hardening tasks
 
-Install `deploy/systemd/dstt-hardening.conf` as a `dstt.service` drop-in, install
-`deploy/nginx/dstt.conf`, remove OAuth secrets from world-readable unit files,
-and disable the obsolete failed unit:
+The helper below makes timestamped root-only backups, moves OAuth secrets into
+the owner-readable environment file without printing them, installs the
+systemd and Nginx configurations, validates both services, and rolls back
+automatically if an application or configuration check fails:
 
 ```bash
-sudo install -m 0644 deploy/systemd/dstt-hardening.conf \
-  /etc/systemd/system/dstt.service.d/20-hardening.conf
-sudo install -m 0644 deploy/nginx/dstt.conf /etc/nginx/sites-available/dstt
-sudo ln -sfn /etc/nginx/sites-available/dstt /etc/nginx/sites-enabled/dstt
-sudo systemctl disable --now gunicorn.service
-sudo systemctl daemon-reload
-sudo nginx -t
-sudo systemctl restart dstt
-sudo systemctl reload nginx
-systemd-analyze security dstt.service
+cd /home/asray/tools/dstt
+sudo bash scripts/apply_root_hardening.sh
 ```
 
 Secrets belong only in the owner-readable environment file (`chmod 600`), not
