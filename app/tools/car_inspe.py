@@ -37,12 +37,21 @@ from app.models import (
     db,
 )
 from app.services import mail_service
+from app.runtime_paths import runtime_path
 
 car_inspe_bp = Blueprint("car_inspe", __name__, url_prefix="/tools/car_inspe")
 logger = logging.getLogger(__name__)
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STORAGE_DIR = os.path.join(APP_ROOT, "..", "var", "car_inspe", "storage", "driver")
+STORAGE_DIR = str(
+    runtime_path(
+        "tools",
+        "car_inspe",
+        "storage",
+        "driver",
+        legacy=os.path.join(APP_ROOT, "..", "var", "car_inspe", "storage", "driver"),
+    )
+)
 
 DOC_TYPES = DriverDocument.DOC_TYPES
 DOC_LABELS = {

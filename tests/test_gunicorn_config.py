@@ -58,3 +58,6 @@ def test_other_settings_are_unchanged(monkeypatch):
     assert mod.bind == "127.0.0.1:5000"
     assert mod.max_requests == 1000
     assert mod.proc_name == "dstt"
+    assert mod.errorlog == "-"
+    assert mod.accesslog == "-"
+    assert mod.capture_output is True

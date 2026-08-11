@@ -15,6 +15,7 @@ from datetime import datetime
 import fitz  # PyMuPDF
 import numpy as np
 from PIL import Image
+from app.runtime_paths import runtime_path
 
 try:
     import cv2
@@ -84,7 +85,14 @@ PDF_RENDER_DPI = 300
 # ============================================================
 # プリセット管理
 # ============================================================
-PRESETS_FILE = os.path.join(os.path.dirname(__file__), "report_relater_presets.json")
+PRESETS_FILE = str(
+    runtime_path(
+        "tools",
+        "report_relater",
+        "presets.json",
+        legacy=os.path.join(os.path.dirname(__file__), "report_relater_presets.json"),
+    )
+)
 
 
 def load_presets():
@@ -101,6 +109,7 @@ def load_presets():
 def save_presets(data):
     """プリセットをファイルに保存"""
     try:
+        os.makedirs(os.path.dirname(PRESETS_FILE), exist_ok=True)
         with open(PRESETS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True

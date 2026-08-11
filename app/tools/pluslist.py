@@ -12,6 +12,7 @@ from io import BytesIO
 import csv
 
 from app.utils.atomic_io import write_json_atomic
+from app.runtime_paths import runtime_path
 
 from app.models import db, Employee, Office, UploadHistory, EditHistory, SalaryMapping, EmployeeSalary, SalaryUploadHistory, ContactUploadHistory, utc_now
 from app.access_control import (
@@ -62,7 +63,8 @@ MAX_EDIT_HISTORY = 50
 
 def get_data_path():
     """データディレクトリのパスを取得"""
-    return os.path.join(current_app.root_path, 'static', 'pluslist')
+    legacy = os.path.join(current_app.root_path, 'static', 'pluslist')
+    return str(runtime_path("tools", "pluslist", legacy=legacy))
 
 
 def ensure_data_directories():

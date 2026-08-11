@@ -28,6 +28,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLS
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.models import FilePostDownloadLog, FilePostUploadLog, db, utc_now
+from app.runtime_paths import runtime_path
 
 from . import share_crypto
 
@@ -40,7 +41,11 @@ share_bp = Blueprint("share", __name__, url_prefix="/tools/share")
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "..", "shared_files")
+UPLOAD_DIR = str(
+    runtime_path(
+        "tools", "filepost", legacy=os.path.join(BASE_DIR, "..", "shared_files")
+    )
+)
 META_PATH = os.path.join(UPLOAD_DIR, "meta.json")
 MAX_FILE_SIZE = 10 * 1024**3  # 10 GiB
 CHUNK_SIZE = 50 * 1024**2  # 50 MiB

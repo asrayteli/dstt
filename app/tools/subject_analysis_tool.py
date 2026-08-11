@@ -12,6 +12,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from app.models import SiteContractMaster
 from app.site_contract_master import VALID_SEGMENTS, ensure_contract_master_synced, manager_ids_match
+from app.runtime_paths import runtime_path
 
 
 subject_analysis_tool_bp = Blueprint("subject_analysis_tool", __name__, url_prefix="/tools/subject_analysis_tool")
@@ -35,7 +36,8 @@ def normalize_contract_code(value):
 
 def get_upload_folder():
     """一時アップロードフォルダを返す。"""
-    folder = os.path.join(current_app.root_path, "static", "subject_analysis_tool", "uploads")
+    legacy = os.path.join(current_app.root_path, "static", "subject_analysis_tool", "uploads")
+    folder = str(runtime_path("tools", "subject_analysis_tool", "uploads", legacy=legacy))
     os.makedirs(folder, exist_ok=True)
     return folder
 

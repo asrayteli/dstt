@@ -9,6 +9,7 @@ import traceback
 
 from app.models import Site, SiteBranch, SiteContractMaster, db
 from app.site_contract_master import load_site_mapping, manager_ids_match
+from app.runtime_paths import runtime_path
 
 monthly_generator_bp = Blueprint("monthly_generator", __name__, url_prefix="/tools/monthly_generator")
 
@@ -119,7 +120,8 @@ BUDGET_TARGET_MAPPING = {
 
 def get_upload_folder():
     """一時アップロードフォルダのパスを取得"""
-    folder = os.path.join(current_app.root_path, 'static', 'monthly_generator', 'uploads')
+    legacy = os.path.join(current_app.root_path, 'static', 'monthly_generator', 'uploads')
+    folder = str(runtime_path("tools", "monthly_generator", "uploads", legacy=legacy))
     os.makedirs(folder, exist_ok=True)
     return folder
 

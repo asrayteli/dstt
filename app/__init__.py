@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
+import re
 import secrets
 import time
 from contextlib import contextmanager
@@ -14,6 +15,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from .navigation import NAV_ITEMS
 from .versioning import calculate_repo_version
+from .runtime_paths import configured_data_root, instance_path, prepare_data_root
 
 try:
     import fcntl
@@ -90,11 +92,41 @@ def _is_duplicate_schema_error(exc: Exception) -> bool:
     )
 
 
+def _portable_schema_sql(sql: str, dialect_name: str) -> str:
+    """Translate the small legacy DDL subset used by startup migrations."""
+    if dialect_name != "postgresql":
+        return sql
+    sql = re.sub(
+        r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b",
+        "BIGSERIAL PRIMARY KEY",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    sql = re.sub(
+        r"\bBOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+0\b",
+        "BOOLEAN NOT NULL DEFAULT FALSE",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    sql = re.sub(
+        r"\bBOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+1\b",
+        "BOOLEAN NOT NULL DEFAULT TRUE",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(
+        r"\bDATETIME\b",
+        "TIMESTAMP WITHOUT TIME ZONE",
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+
 def _run_schema_statements(statements: list[str], *, ignore_duplicates: bool = False) -> None:
     for sql in statements:
         try:
             with db.engine.begin() as conn:
-                conn.execute(text(sql))
+                conn.execute(text(_portable_schema_sql(sql, db.engine.dialect.name)))
         except SQLAlchemyError as exc:
             if ignore_duplicates and _is_duplicate_schema_error(exc):
                 continue
@@ -162,8 +194,14 @@ def _resolve_secret_key(app: Flask, test_config=None) -> str:
 
 def _resolve_database_uri(test_config=None) -> str:
     if test_config and test_config.get("SQLALCHEMY_DATABASE_URI"):
-        return str(test_config["SQLALCHEMY_DATABASE_URI"])
-    return os.environ.get("DSTT_DATABASE_URI", "sqlite:///users.db")
+        uri = str(test_config["SQLALCHEMY_DATABASE_URI"])
+    else:
+        uri = os.environ.get("DSTT_DATABASE_URI", "sqlite:///users.db")
+    if uri.startswith("postgres://"):
+        return "postgresql+psycopg://" + uri[len("postgres://"):]
+    if uri.startswith("postgresql://"):
+        return "postgresql+psycopg://" + uri[len("postgresql://"):]
+    return uri
 
 
 def _seed_tool_categories():
@@ -776,7 +814,16 @@ def _backfill_empty_cloudshift_drafts(app):
 
 
 def create_app(test_config=None):
-    app = Flask(__name__, static_folder='./static/')
+    data_root = configured_data_root(test_config)
+    flask_options = {"static_folder": "./static/"}
+    resolved_instance_path = instance_path(test_config)
+    if data_root is not None and resolved_instance_path is not None:
+        prepare_data_root(data_root)
+        prepare_data_root(resolved_instance_path)
+        flask_options["instance_path"] = str(resolved_instance_path)
+    app = Flask(__name__, **flask_options)
+    if data_root is not None:
+        app.config["DSTT_DATA_DIR"] = str(data_root)
     app_version = os.environ.get('DSTT_APP_VERSION')
     if app_version:
         app.config['APP_VERSION'] = app_version
@@ -784,6 +831,11 @@ def create_app(test_config=None):
         app.config['APP_VERSION'] = calculate_repo_version(Path(app.root_path).parent)
     app.config['SECRET_KEY'] = _resolve_secret_key(app, test_config)
     app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_uri(test_config)
+    if str(app.config['SQLALCHEMY_DATABASE_URI']).startswith('postgresql'):
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'pool_pre_ping': True,
+            'pool_recycle': 1800,
+        }
     app.config['ALLOW_SELF_REGISTRATION'] = _env_bool('DSTT_ALLOW_SELF_REGISTRATION', False)
     app.config['ENABLE_LEGACY_ADMIN'] = _env_bool('DSTT_ENABLE_LEGACY_ADMIN', False)
     # リクエストボディの全体上限（未設定だと無制限で、巨大ボディ送信による

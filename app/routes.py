@@ -11,6 +11,26 @@ from .manuals import get_manual
 main = Blueprint("main", __name__)
 
 
+@main.route("/health/live")
+def health_live():
+    return jsonify({"status": "ok"})
+
+
+@main.route("/health/ready")
+def health_ready():
+    from sqlalchemy import text
+
+    from .models import db
+
+    try:
+        db.session.execute(text("SELECT 1"))
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Readiness database check failed")
+        return jsonify({"status": "unavailable"}), 503
+    return jsonify({"status": "ok"})
+
+
 @main.route("/about")
 def about():
     """ログインなしで、フィルタリング製品にもサイトの用途を明示する。"""

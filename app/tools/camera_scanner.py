@@ -22,12 +22,19 @@ from flask_login import current_user, login_required
 from app.access_control import is_admin_user
 from app.models import CameraScan, db, jst_now
 from app.services import camera_scanner_service as scanner
+from app.runtime_paths import runtime_path
 
 camera_scanner_bp = Blueprint("camera_scanner", __name__, url_prefix="/tools/camera_scanner")
 logger = logging.getLogger(__name__)
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STORAGE_DIR = os.path.join(APP_ROOT, "..", "var", "camera_scanner")
+STORAGE_DIR = str(
+    runtime_path(
+        "tools",
+        "camera_scanner",
+        legacy=os.path.join(APP_ROOT, "..", "var", "camera_scanner"),
+    )
+)
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 1枚あたり上限20MB
 
@@ -76,9 +83,10 @@ def _add_missing_columns():
         return
     existing = {col["name"] for col in insp.get_columns("camera_scans")}
     if "keep_original" not in existing:
+        default = "FALSE" if db.engine.dialect.name == "postgresql" else "0"
         with db.engine.begin() as conn:
             conn.execute(text(
-                "ALTER TABLE camera_scans ADD COLUMN keep_original BOOLEAN NOT NULL DEFAULT 0"
+                f"ALTER TABLE camera_scans ADD COLUMN keep_original BOOLEAN NOT NULL DEFAULT {default}"
             ))
 
 

@@ -2286,7 +2286,9 @@ class HealthCheckEditHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     record_id = db.Column(db.Integer, nullable=True, index=True)
     target_year = db.Column(db.Integer, nullable=True)
-    employee_name = db.Column(db.String(100), nullable=True)
+    # Bulk audit events can contain a comma-separated set of employee names.
+    # SQLite never enforced the previous VARCHAR(100), while PostgreSQL does.
+    employee_name = db.Column(db.Text, nullable=True)
     edited_by = db.Column(db.String(80), nullable=False)
     edited_at = db.Column(db.DateTime, default=jst_now, nullable=False, index=True)
     action = db.Column(db.String(20), nullable=False)  # create / update / delete
