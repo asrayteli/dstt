@@ -185,12 +185,21 @@ async function main() {
 
     const existingByName = new Map(existingMonitors.map((monitor) => [monitor.name, monitor]));
     async function ensureMonitor(specification, attachNotification = true) {
-        if (existingByName.has(specification.name)) {
-            return existingByName.get(specification.name).id;
+        const existing = existingByName.get(specification.name);
+        const notificationIDList = attachNotification ? { [notificationID]: true } : {};
+        if (existing) {
+            const response = await emitWithAck(socket, "getMonitor", existing.id);
+            const updatedMonitor = {
+                ...response.monitor,
+                ...specification,
+                notificationIDList,
+            };
+            await emitWithAck(socket, "editMonitor", updatedMonitor);
+            return existing.id;
         }
         const monitor = monitorDefaults({
             ...specification,
-            notificationIDList: attachNotification ? { [notificationID]: true } : {},
+            notificationIDList,
         });
         const response = await emitWithAck(socket, "add", monitor);
         existingByName.set(specification.name, {
@@ -243,6 +252,8 @@ async function main() {
         url: null,
         hostname: "dstt.dipalette.com",
         dns_resolve_type: "A",
+        dns_resolve_server: "1.1.1.1",
+        port: 53,
         interval: 300,
         retryInterval: 60,
         maxretries: 2,
