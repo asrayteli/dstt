@@ -131,9 +131,9 @@ systemctl restart dstt
 
 for _ in $(seq 1 30); do
     if systemctl is-active --quiet dstt && \
-       curl --silent --show-error --fail \
+       curl --silent --fail \
            -H 'Host: dstt.dipalette.com' \
-           http://127.0.0.1:5000/health/ready >/dev/null; then
+           http://127.0.0.1:5000/health/ready >/dev/null 2>&1; then
         break
     fi
     sleep 1
@@ -148,6 +148,7 @@ curl --silent --show-error --fail --insecure \
     https://dstt.dipalette.com/health/ready >/dev/null
 
 systemctl disable --now gunicorn.service 2>/dev/null || true
+systemctl reset-failed gunicorn.service 2>/dev/null || true
 
 trap - ERR
 echo "DSTT root hardening completed. Backup: ${backup_dir}"
