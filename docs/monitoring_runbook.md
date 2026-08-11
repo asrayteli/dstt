@@ -31,18 +31,18 @@ setup has created `/var/lib/uptime-kuma/kuma.db`.
 
 Managed monitors:
 
-1. `DSTT Public Readiness`: HTTPS, `https://dstt.dipalette.com/health/ready`,
+1. `DSTT 公開レディネス`: HTTPS, `https://dstt.dipalette.com/health/ready`,
    120-second interval, 3 retries, accepted status 200-299, certificate expiry.
-2. `DSTT Public Login`: HTTPS, `https://dstt.dipalette.com/auth/login`,
+2. `DSTT 公開ログイン画面`: HTTPS, `https://dstt.dipalette.com/auth/login`,
    300-second interval, 2 retries.
-3. `DSTT Public DNS`: DNS A lookup through `1.1.1.1`, 300-second interval.
+3. `DSTT 公開DNS`: DNS A lookup through `1.1.1.1`, 300-second interval.
 4. `dipalette Tailscale Ping`: ICMP over the Tailnet, 300-second interval.
 5. `dipalette Tailscale SSH`: TCP port, host `100.116.90.83`, port 22,
    300-second interval, 2 retries.
-6. `dipalette internal health`: five-minute push monitor checking the DSTT and
+6. `dipalette 内部健全性`: five-minute push monitor checking the DSTT and
    Nginx services, local database readiness, failed systemd units, disk space,
    available memory, and a writable root filesystem.
-7. `DSTT off-site backup`: 26-hour push monitor updated only after a verified
+7. `DSTT オフサイトバックアップ`: 26-hour push monitor updated only after a verified
    backup is present on AsrayHome.
 
 The public readiness monitor exercises DNS, Cloudflare, TLS, Nginx, Flask, and
