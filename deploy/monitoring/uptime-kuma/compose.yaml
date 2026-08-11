@@ -1,0 +1,27 @@
+name: dstt-monitoring
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.3.2
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - /var/lib/uptime-kuma:/app/data
+    environment:
+      TZ: Asia/Tokyo
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    mem_limit: 1g
+    cpus: 2.0
+    stop_grace_period: 1m
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

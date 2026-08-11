@@ -1,0 +1,21 @@
+[Unit]
+Description=Create and verify a portable Uptime Kuma backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/dstt-monitoring/backup_uptime_kuma.py --data-directory /var/lib/uptime-kuma --destination /var/backups/uptime-kuma --keep 14
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/var/lib/uptime-kuma
+ReadWritePaths=/var/backups/uptime-kuma

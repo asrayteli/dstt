@@ -1,0 +1,11 @@
+[Unit]
+Description=Back up Uptime Kuma every day
+
+[Timer]
+OnCalendar=*-*-* 05:20:00 Asia/Tokyo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=uptime-kuma-backup.service
+
+[Install]
+WantedBy=timers.target
