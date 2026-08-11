@@ -1,3 +1,5 @@
+import secrets
+from datetime import timedelta
 from time import monotonic, sleep
 from urllib.parse import urlsplit
 
@@ -5,13 +7,16 @@ from flask import Blueprint, abort, current_app, flash, redirect, render_templat
 from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import DsttLoginLog, User, UserLoginLog, db
+from .models import DsttLoginLog, User, UserLoginLog, db, utc_now
 from .security.password_policy import password_policy_error
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 _FAILED_LOGIN_ATTEMPTS: dict[tuple[str, str], list[float]] = {}
+_DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(32))
+_MAX_LOGIN_USERNAME_LENGTH = 80
+_MAX_LOGIN_PASSWORD_LENGTH = 4096
 
 
 def _client_ip() -> str | None:
@@ -51,6 +56,49 @@ def _consume_next_url() -> str:
 
 def _failure_key(username: str) -> tuple[str, str]:
     return ((_client_ip() or ""), username.lower())
+
+
+def _is_shared_rate_limited(username: str) -> bool:
+    """DB の監査ログを使い、全ワーカー共通で過剰なログイン試行を止める。"""
+    if not username:
+        return False
+
+    threshold = int(current_app.config.get("LOGIN_FAILURE_MAX_ATTEMPTS", 10))
+    window_seconds = int(current_app.config.get("LOGIN_FAILURE_WINDOW_SECONDS", 300))
+    if threshold <= 0 or window_seconds <= 0:
+        return False
+
+    cutoff = utc_now() - timedelta(seconds=window_seconds)
+    recent_failures = UserLoginLog.query.filter(
+        UserLoginLog.success.is_(False),
+        UserLoginLog.logged_in_at >= cutoff,
+    )
+    client_ip = _client_ip()
+    pair_query = recent_failures.filter(
+        UserLoginLog.username == username[:_MAX_LOGIN_USERNAME_LENGTH],
+    )
+    if client_ip:
+        pair_query = pair_query.filter(UserLoginLog.ip_address == client_ip)
+    return pair_query.count() >= threshold
+
+
+def _authenticate(username: str, password: str) -> User | None:
+    """存在しないユーザーでも同じパスワード検証を行い、応答時間差を抑える。"""
+    input_is_valid = (
+        0 < len(username) <= _MAX_LOGIN_USERNAME_LENGTH
+        and len(password) <= _MAX_LOGIN_PASSWORD_LENGTH
+    )
+    user = User.query.filter_by(username=username).first() if input_is_valid else None
+    password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+    candidate = password if input_is_valid else "invalid-login-input"
+    try:
+        valid = check_password_hash(password_hash, candidate)
+    except (TypeError, ValueError):
+        # 壊れた旧ハッシュから500を返さず、存在しないユーザーと同じ処理量に寄せる。
+        check_password_hash(_DUMMY_PASSWORD_HASH, "invalid-password-hash")
+        current_app.logger.warning("Invalid password hash for login user %r", username[:80])
+        return None
+    return user if user is not None and valid else None
 
 
 def _prune_stale_attempts(now: float, window_seconds: int) -> None:
@@ -140,8 +188,19 @@ def login():
         password = request.form.get("password") or ""
         remember = request.form.get("remember") == "1"
 
-        user = User.query.filter_by(username=username).first()
-        if user and check_password_hash(user.password_hash, password):
+        rate_limit_username = username[:_MAX_LOGIN_USERNAME_LENGTH]
+        if _is_shared_rate_limited(rate_limit_username):
+            flash("ログイン試行が多すぎます。しばらく待ってから再試行してください", "error")
+            response = current_app.make_response(
+                (render_template("login.html", next_url=next_url), 429)
+            )
+            response.headers["Retry-After"] = str(
+                max(1, int(current_app.config.get("LOGIN_FAILURE_WINDOW_SECONDS", 300)))
+            )
+            return response
+
+        user = _authenticate(username, password)
+        if user is not None:
             session.clear()
             login_user(user, remember=remember)
             _clear_failed_attempts(username)
@@ -152,10 +211,10 @@ def login():
                 current_app.logger.exception("Failed to record DSTT login log")
             return redirect(_consume_next_url())
 
-        if username:
-            _register_failed_attempt(username)
+        if rate_limit_username:
+            _register_failed_attempt(rate_limit_username)
             try:
-                _record_failed_login(username)
+                _record_failed_login(rate_limit_username)
             except Exception:
                 db.session.rollback()
 

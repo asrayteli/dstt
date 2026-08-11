@@ -198,6 +198,23 @@ def test_password_policy_only_requires_four_characters():
     assert password_policy_error("x" * 1000) is None
 
 
+def test_trusted_hosts_rejects_unexpected_host(tmp_path, monkeypatch):
+    _stub_optional_deps()
+    monkeypatch.setenv("DSTT_TRUSTED_HOSTS", "dstt.example.jp,.internal.example.jp")
+    from app import create_app
+
+    app = create_app({
+        "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'trusted-host.db'}",
+        "SECRET_KEY": "test-secret",
+        "TESTING": True,
+    })
+    client = app.test_client()
+
+    assert client.get("/auth/login", base_url="http://dstt.example.jp").status_code == 200
+    assert client.get("/auth/login", base_url="http://tool.internal.example.jp").status_code == 200
+    assert client.get("/auth/login", base_url="http://evil.example.net").status_code == 400
+
+
 def test_sqlite_engine_has_wal_and_busy_timeout(tmp_path, monkeypatch):
     """ファイルベース SQLite では WAL と busy_timeout が全接続に適用される。"""
     _stub_optional_deps()
@@ -274,6 +291,11 @@ def test_hsts_header_only_on_https_requests(app_ctx):
 
     plain = client.get("/auth/login")
     assert "Strict-Transport-Security" not in plain.headers
+    assert plain.headers["Cache-Control"] == "no-store, private"
+    assert plain.headers["X-Permitted-Cross-Domain-Policies"] == "none"
+    assert plain.headers["Content-Security-Policy"] == (
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    )
 
     secure = client.get("/auth/login", base_url="https://localhost")
     assert secure.headers.get("Strict-Transport-Security") == "max-age=31536000"

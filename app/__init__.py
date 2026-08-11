@@ -121,6 +121,11 @@ def _env_nonnegative_int(name: str, default: int = 0) -> int:
         return default
 
 
+def _env_csv(name: str) -> list[str]:
+    """Comma-separated environment values, stripped and without empties."""
+    return [part.strip() for part in os.environ.get(name, "").split(",") if part.strip()]
+
+
 def _load_or_create_local_secret(app: Flask) -> str:
     secret_path = Path(app.instance_path) / "secret_key"
     if secret_path.exists():
@@ -794,6 +799,11 @@ def create_app(test_config=None):
     app.config['LOGIN_FAILURE_WINDOW_SECONDS'] = int(os.environ.get('DSTT_LOGIN_FAILURE_WINDOW_SECONDS', '300'))
     app.config['LOGIN_FAILURE_DELAY_THRESHOLD'] = int(os.environ.get('DSTT_LOGIN_FAILURE_DELAY_THRESHOLD', '3'))
     app.config['LOGIN_FAILURE_DELAY_SECONDS'] = float(os.environ.get('DSTT_LOGIN_FAILURE_DELAY_SECONDS', '0.6'))
+    app.config['LOGIN_FAILURE_MAX_ATTEMPTS'] = int(os.environ.get('DSTT_LOGIN_FAILURE_MAX_ATTEMPTS', '10'))
+    trusted_hosts = _env_csv('DSTT_TRUSTED_HOSTS')
+    if trusted_hosts:
+        # Flask/Werkzeug のルーティング前検証を使い、Host header injection を防ぐ。
+        app.config['TRUSTED_HOSTS'] = trusted_hosts
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = os.environ.get('DSTT_SESSION_COOKIE_SAMESITE', 'Lax')
     app.config['SESSION_COOKIE_SECURE'] = _env_bool(
@@ -1145,6 +1155,13 @@ def create_app(test_config=None):
         # CSP・DENY 等）を設定済みの場合はそれを上書きしない。
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+        # 既存のインライン JS/CSS は制限せず、クリックジャッキング、<base> 差替え、
+        # 古いプラグイン埋め込みだけを拒否する互換性重視の最小 CSP。
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        )
         # URL に共有トークンを含むツールがあるため、外部遷移時の Referer 漏洩を抑える。
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault(
@@ -1157,10 +1174,11 @@ def create_app(test_config=None):
         # 中間キャッシュへ残さない。静的CSS/JS/画像まで no-store にすると表示速度と
         # PWAキャッシュを損なうため除外し、個別ルートのより厳格な指定は維持する。
         from flask_login import current_user as _header_user
-        if (
+        _security_path = _security_request.path or ""
+        if _security_path.startswith("/auth/") or (
             getattr(_header_user, "is_authenticated", False)
             and _security_request.endpoint != "static"
-            and not (_security_request.path or "").startswith("/static/")
+            and not _security_path.startswith("/static/")
         ):
             response.headers.setdefault("Cache-Control", "no-store, private")
         # HTTPS で届いたリクエスト（ProxyFix 経由の X-Forwarded-Proto 含む）にのみ

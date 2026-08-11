@@ -1166,7 +1166,10 @@ def _normalized_person_title(value: Any) -> str:
 
 
 def _sync_entry_id(*parts: Any) -> str:
-    digest = hashlib.sha1("::".join(str(part or "") for part in parts).encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(
+        "::".join(str(part or "") for part in parts).encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()
     return f"sync_{digest[:16]}"
 
 
@@ -2571,7 +2574,10 @@ def _owner_project_or_404(project_id: str) -> dict[str, Any]:
 
 
 def _substitute_project_id(office_id: int) -> str:
-    digest = hashlib.sha1(f"substitute-office:{int(office_id)}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(
+        f"substitute-office:{int(office_id)}".encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()
     return f"sub_{digest[:16]}"
 
 
@@ -2585,7 +2591,8 @@ def _substitute_request_entry_id(source_project_id: str, month_key: str, day_key
                 str(day_key or ""),
                 str(source_entry_id or ""),
             ]
-        ).encode("utf-8")
+        ).encode("utf-8"),
+        usedforsecurity=False,
     ).hexdigest()
     return f"subreq_{digest[:16]}"
 
