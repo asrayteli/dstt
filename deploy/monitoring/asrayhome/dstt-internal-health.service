@@ -1,0 +1,10 @@
+[Unit]
+Description=Probe dipalette DSTT internals and update Uptime Kuma
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+EnvironmentFile=%h/.config/dstt-monitoring/push.env
+ExecStart=%h/.local/lib/dstt/dstt_internal_probe.py

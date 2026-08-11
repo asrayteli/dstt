@@ -6,6 +6,20 @@ remote_root=${DSTT_BACKUP_REMOTE_ROOT:-/home/asray/backups/dstt}
 destination=${DSTT_OFFSITE_BACKUP_DIR:-/home/asray/backups/dstt/dipalette}
 verifier=${DSTT_BACKUP_VERIFIER:-/home/asray/.local/lib/dstt/backup_dstt.py}
 keep=${DSTT_OFFSITE_BACKUP_KEEP:-30}
+push_url=${DSTT_BACKUP_PUSH_URL:-}
+
+notify_push() {
+    local status=$1
+    local message=$2
+    if [[ -z "$push_url" ]]; then
+        return 0
+    fi
+    curl --fail --silent --show-error --max-time 15 --get \
+        --data-urlencode "status=$status" \
+        --data-urlencode "msg=$message" \
+        --data-urlencode "ping=0" \
+        "$push_url" >/dev/null
+}
 
 case "$keep" in
     ''|*[!0-9]*) echo "DSTT_OFFSITE_BACKUP_KEEP must be a positive integer" >&2; exit 2 ;;
@@ -26,14 +40,20 @@ fi
 final="$destination/$latest"
 if [[ -d "$final" ]]; then
     python3 "$verifier" --verify-only "$final"
+    notify_push up "verified existing off-site backup $latest"
     exit 0
 fi
 
 staging=$(mktemp -d "$destination/.partial-$latest.XXXXXX")
 cleanup() {
+    local status=$?
     if [[ -n "${staging:-}" && -d "$staging" && "$staging" == "$destination"/.partial-* ]]; then
         rm -rf -- "$staging"
     fi
+    if (( status != 0 )); then
+        notify_push down "off-site backup synchronization failed (exit $status)" || true
+    fi
+    return "$status"
 }
 trap cleanup EXIT
 
@@ -59,3 +79,4 @@ for old in "${snapshots[@]:$keep}"; do
 done
 
 python3 "$verifier" --verify-only "$final"
+notify_push up "copied and verified off-site backup $latest"
