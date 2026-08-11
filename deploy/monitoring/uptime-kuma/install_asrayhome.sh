@@ -26,7 +26,7 @@ install -d -m 0700 "${change_backup}"
 if [[ -d ${install_root} ]]; then
     cp -a "${install_root}" "${change_backup}/install-root"
 fi
-tailscale serve get-config > "${change_backup}/tailscale-serve.json"
+tailscale serve get-config "${change_backup}/tailscale-serve.hujson" --all
 
 install -d -o root -g root -m 0755 "${install_root}" "${library_root}"
 install -d -o root -g root -m 0700 "${data_root}" "${backup_root}"
