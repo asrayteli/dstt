@@ -1,0 +1,11 @@
+[Unit]
+Description=Copy the dipalette DSTT backup to asrayhome-server every day
+
+[Timer]
+OnCalendar=*-*-* 04:15:00 Asia/Tokyo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=dstt-backup-offsite.service
+
+[Install]
+WantedBy=timers.target

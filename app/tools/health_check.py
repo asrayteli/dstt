@@ -27,6 +27,7 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import selectinload
 
 from app.utils.atomic_io import write_json_atomic
+from app.runtime_paths import runtime_path
 from app.models import (
     db,
     Employee,
@@ -286,7 +287,8 @@ def get_office_health_officers(office_code: str | None) -> list[str]:
 # ============================================================
 
 def get_data_path() -> str:
-    return os.path.join(current_app.root_path, "static", "health_check")
+    legacy = os.path.join(current_app.root_path, "static", "health_check")
+    return str(runtime_path("tools", "health_check", legacy=legacy))
 
 
 def get_uploads_path() -> str:

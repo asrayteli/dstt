@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the DSTT backup every day
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 Asia/Tokyo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=dstt-backup.service
+
+[Install]
+WantedBy=timers.target

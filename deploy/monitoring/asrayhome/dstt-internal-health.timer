@@ -1,0 +1,12 @@
+[Unit]
+Description=Probe dipalette DSTT internals every five minutes
+
+[Timer]
+OnBootSec=2m
+OnUnitInactiveSec=5m
+RandomizedDelaySec=20s
+Persistent=true
+Unit=dstt-internal-health.service
+
+[Install]
+WantedBy=timers.target

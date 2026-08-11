@@ -3,6 +3,9 @@ dstt/
 Lib/
 Include/
 Scripts/
+!scripts/
+!scripts/*.py
+!scripts/*.sh
 pyvenv.cfg
 .venv/
 venv/

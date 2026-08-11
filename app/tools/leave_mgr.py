@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.utils.atomic_io import write_json_atomic
+from app.runtime_paths import runtime_path
 
 leave_mgr_bp = Blueprint("leave_mgr", __name__, url_prefix="/tools/leave_mgr")
 
@@ -30,7 +31,8 @@ SYNC_REMARK_PREFIX = "[from CloudShift]"
 
 def get_data_path():
     """データディレクトリのパスを取得"""
-    return os.path.join(current_app.root_path, 'static', 'leave_mgr')
+    legacy = os.path.join(current_app.root_path, 'static', 'leave_mgr')
+    return str(runtime_path("tools", "leave_mgr", legacy=legacy))
 
 def ensure_data_directories():
     """必要なディレクトリとファイルを作成"""

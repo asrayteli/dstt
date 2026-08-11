@@ -1,0 +1,8 @@
+[Unit]
+Description=Create and verify a DSTT application data backup
+
+[Service]
+Type=oneshot
+UMask=0077
+WorkingDirectory=/home/asray/tools/dstt
+ExecStart=/usr/bin/python3 /home/asray/.local/lib/dstt/backup_dstt.py --project-root /home/asray/tools/dstt --data-root /home/asray/.local/share/dstt --database /home/asray/.local/share/dstt/instance/users.db --destination /home/asray/backups/dstt --keep 7

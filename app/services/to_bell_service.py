@@ -1272,11 +1272,13 @@ def _normalize_template_payload(raw: Any) -> dict[str, Any]:
 
 def _attachment_dir() -> Path:
     from flask import current_app
+    from app.runtime_paths import runtime_path
 
     override = current_app.config.get("TO_BELL_ATTACHMENT_DIR")
     if override:
         return Path(override)
-    return Path(__file__).resolve().parents[2] / "var" / "to_bell" / "attachments"
+    legacy = Path(__file__).resolve().parents[2] / "var" / "to_bell" / "attachments"
+    return runtime_path("tools", "to_bell", "attachments", legacy=legacy)
 
 
 def _resolve_task_notifications(task: ToBellTask) -> None:

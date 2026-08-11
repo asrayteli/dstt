@@ -49,9 +49,11 @@ max_requests_jitter = 100
 # クラッシュしてソケットは開くのに応答できず 502 になった。tmpfs 最適化より
 # 起動の確実性を優先する。
 
-# Log files
-errorlog = "/var/log/dstt/error.log"
-accesslog = "/var/log/dstt/access.log"
+# Under systemd, stdout/stderr are collected and rotated by journald. Paths can
+# still be supplied explicitly for non-systemd deployments.
+errorlog = os.environ.get("DSTT_GUNICORN_ERRORLOG", "-")
+accesslog = os.environ.get("DSTT_GUNICORN_ACCESSLOG", "-")
+capture_output = True
 loglevel = "info"
 
 # Process naming

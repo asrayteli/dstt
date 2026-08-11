@@ -296,10 +296,12 @@ def _cloudshift_duplicate_schema_error(exc: Exception) -> bool:
 
 
 def _run_cloudshift_schema_statements(statements: list[str], *, ignore_duplicates: bool = False) -> None:
+    from app import _portable_schema_sql
+
     for sql in statements:
         try:
             with db.engine.begin() as conn:
-                conn.execute(text(sql))
+                conn.execute(text(_portable_schema_sql(sql, db.engine.dialect.name)))
         except SQLAlchemyError as exc:
             if ignore_duplicates and _cloudshift_duplicate_schema_error(exc):
                 continue
@@ -317,7 +319,16 @@ def _jst_now_iso() -> str:
 
 def _runtime_root() -> Path:
     configured = current_app.config.get("CLOUDSHIFT_DATA_DIR") or os.environ.get("CLOUDSHIFT_DATA_DIR")
-    base = Path(configured) if configured else Path(current_app.instance_path) / "cloudshift"
+    if configured:
+        base = Path(configured)
+    else:
+        from app.runtime_paths import runtime_path
+
+        base = runtime_path(
+            "tools",
+            "cloudshift",
+            legacy=Path(current_app.instance_path) / "cloudshift",
+        )
     shifts = base / "shifts"
     histories = base / "histories"
     locks = base / "locks"
