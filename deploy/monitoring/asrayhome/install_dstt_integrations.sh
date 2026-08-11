@@ -30,6 +30,10 @@ install -o "$target_user" -g "$target_user" -m 0600 \
     "$push_source" "$target_home/.config/dstt-monitoring/push.env"
 install -o "$target_user" -g "$target_user" -m 0755 \
     "$source_dir/dstt_internal_probe.py" "$target_home/.local/lib/dstt/dstt_internal_probe.py"
+if [[ -d "$target_home/.hermes/scripts" ]]; then
+    install -o "$target_user" -g "$target_user" -m 0755 \
+        "$source_dir/dstt_daily_audit.py" "$target_home/.hermes/scripts/dstt-audit.py"
+fi
 install -o "$target_user" -g "$target_user" -m 0755 \
     "$repository_root/scripts/sync_dstt_backup.sh" "$target_home/.local/lib/dstt/sync_dstt_backup.sh"
 install -o "$target_user" -g "$target_user" -m 0644 \
