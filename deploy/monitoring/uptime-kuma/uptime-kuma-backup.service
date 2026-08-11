@@ -2,6 +2,7 @@
 Description=Create and verify a portable Uptime Kuma backup
 After=docker.service
 Requires=docker.service
+ConditionPathExists=/var/lib/uptime-kuma/kuma.db
 
 [Service]
 Type=oneshot

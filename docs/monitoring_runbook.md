@@ -26,6 +26,8 @@ sudo bash deploy/monitoring/uptime-kuma/install_asrayhome.sh
 
 Open the tailnet dashboard, create the first administrator, enable two-factor
 authentication, and store the recovery material in a password manager.
+The backup service intentionally skips runs until the initial SQLite database
+setup has created `/var/lib/uptime-kuma/kuma.db`.
 
 Recommended monitors:
 
