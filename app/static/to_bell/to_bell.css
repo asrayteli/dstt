@@ -1276,8 +1276,9 @@ textarea:focus-visible {
 }
 
 .tobell-template-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  /* ボタン数が可変（公開範囲切替・削除は作成者のみ）なので flex で折り返す */
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
   padding: 0.6rem 0.7rem;
@@ -1287,6 +1288,7 @@ textarea:focus-visible {
 }
 
 .tobell-template-main {
+  flex: 1 1 12rem;
   min-width: 0;
 }
 
@@ -1304,6 +1306,14 @@ textarea:focus-visible {
 .tobell-template-create {
   border-top: 1px solid #e2e8f0;
   padding-top: 0.85rem;
+  /* 名前・公開範囲・作成ボタンの3列 */
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+@media (max-width: 560px) {
+  .tobell-template-create {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* ===== 添付ビューワ（画像 / PDF） ===== */
@@ -2183,4 +2193,79 @@ body.tobell-pwa-mode .tobell-viewer-stage embed {
 }
 .tobell-project-date-note {
   margin-top: -0.2rem;
+}
+
+/* ===== 通知パネル（クリックで対象を開く／✓で対応済みにする） ===== */
+.tobell-notification {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  align-items: start;
+}
+
+.tobell-notification-main {
+  min-width: 0;
+  cursor: pointer;
+}
+
+.tobell-notification-main:focus-visible {
+  outline: 2px solid var(--tb-accent, #2563eb);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.tobell-notification.is-unread {
+  border-left: 3px solid #2563eb;
+}
+
+.tobell-notification.is-resolved {
+  opacity: 0.6;
+}
+
+.tobell-notification-resolve {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: transparent;
+  color: #15803d;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tobell-notification-resolve:hover {
+  background: #dcfce7;
+}
+
+/* ===== 終日タスク ===== */
+input[type="datetime-local"].is-all-day {
+  opacity: 0.7;
+}
+
+/* ===== プロジェクトを開いた状態でのクイック追加 ===== */
+.tobell-quick-form.has-project input[name="title"] {
+  border-color: #2563eb;
+}
+
+.tobell-newtask-hint {
+  margin: 0.2rem 0 0;
+}
+
+/* ===== FILEPOST に退避した添付 ===== */
+.tobell-attachment-external {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px dashed #cbd5e1;
+}
+
+/* ===== 権限が無くて使えない連携 ===== */
+.tobell-integration-row.is-locked {
+  opacity: 0.65;
+}
+
+.tobell-integration-locked {
+  margin-top: 0.25rem;
+  color: #b45309;
+  font-size: 0.76rem;
+  line-height: 1.5;
 }

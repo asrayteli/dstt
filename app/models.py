@@ -1527,6 +1527,10 @@ class ToBellTask(db.Model):
     status = db.Column(db.String(24), nullable=False, default='todo', index=True)
     priority = db.Column(db.String(16), nullable=False, default='normal', index=True)
     due_at = db.Column(db.DateTime, nullable=True, index=True)
+    # 期日を指定せずに追加したため自動で入れた日付か。
+    # 利用者が決めた締切ではないので、「期限切れ」の判定には使わない。
+    # 利用者が期日を変えた時点で False になる（本人が決めた締切になる）。
+    due_auto = db.Column(db.Boolean, nullable=False, default=False)
     start_at = db.Column(db.DateTime, nullable=True)
     completed_at = db.Column(db.DateTime, nullable=True)
     created_by = db.Column(db.String(80), nullable=False, index=True)
@@ -1584,6 +1588,17 @@ class ToBellTask(db.Model):
             return int(round((done / len(self.subtasks)) * 100))
         return max(0, min(100, int(self.manual_progress or 0)))
 
+    def is_all_day(self) -> bool:
+        """時刻を指定していない「終日タスク」か。
+
+        ToBell は時刻未指定のタスクを当日の 23:59:59 として保存する規約になっている
+        （app/services/to_bell_service.py の END_OF_DAY）。画面はこのフラグを見て
+        時刻表示を出し分け、保存時に 23:59:59 を維持する。
+        """
+        if self.due_at is None:
+            return False
+        return (self.due_at.hour, self.due_at.minute, self.due_at.second) == (23, 59, 59)
+
     def to_dict(self, include_detail: bool = True) -> dict:
         data = {
             'id': self.id,
@@ -1592,6 +1607,8 @@ class ToBellTask(db.Model):
             'status': self.status,
             'priority': self.priority,
             'due_at': self.due_at.isoformat() if self.due_at else None,
+            'due_all_day': self.is_all_day(),
+            'due_auto': bool(self.due_auto),
             'start_at': self.start_at.isoformat() if self.start_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'created_by': self.created_by,

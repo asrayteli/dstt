@@ -277,13 +277,19 @@ def test_to_bell_rejects_assignment_outside_same_office(app_ctx):
 
 
 def test_to_bell_quick_datetime_is_optional_and_due_tasks_notify(app_ctx):
+    from app.services.to_bell_service import local_today
+
     _create_user(app_ctx, "alice", "Alice")
     client = app_ctx.test_client()
     _login(client, "alice")
 
+    # 期日を指定せずに追加したタスクは「追加した日の終日」になる（カレンダーに並ぶ）。
+    # 終日＝時刻未指定なので、通知（プッシュ／前面通知）の対象にはならない。
     no_due = client.post("/tools/to_bell/api/tasks", json={"title": "あとで整理"})
     assert no_due.status_code == 201
-    assert no_due.get_json()["due_at"] is None
+    created = no_due.get_json()
+    assert created["due_at"] == f"{local_today().isoformat()}T23:59:59"
+    assert created["due_all_day"] is True
 
     from app.services.local_time import local_now
 
@@ -590,6 +596,7 @@ def test_to_bell_template_from_task_and_instantiate(app_ctx):
         "/tools/to_bell/api/tasks",
         json={"title": "毎月の手順", "priority": "high", "tags": "月次"},
     ).get_json()
+    assert task["due_auto"] is True
     client.post(f"/tools/to_bell/api/tasks/{task['id']}/subtasks", json={"title": "手順1"})
     client.post(f"/tools/to_bell/api/tasks/{task['id']}/subtasks", json={"title": "手順2"})
 
@@ -609,6 +616,7 @@ def test_to_bell_template_from_task_and_instantiate(app_ctx):
     new_task = instance.get_json()
     assert new_task["title"] == "毎月の手順"
     assert new_task["priority"] == "high"
+    assert new_task["due_auto"] is True
     assert len(new_task["subtasks"]) == 2
 
     assert client.delete(f"/tools/to_bell/api/templates/{template_id}").status_code == 200

@@ -500,6 +500,10 @@ def _ensure_access_control_schema(app):
                 alters.append("ALTER TABLE to_bell_tasks ADD COLUMN gcal_synced_by VARCHAR(80)")
             if "gcal_reminder_override" not in task_cols:
                 alters.append("ALTER TABLE to_bell_tasks ADD COLUMN gcal_reminder_override JSON")
+            if "due_auto" not in task_cols:
+                # 期日未指定で追加したタスクに自動で入れた日付かどうか。
+                # 既存行は「利用者が入れた期日」として扱う（0=False）。
+                alters.append("ALTER TABLE to_bell_tasks ADD COLUMN due_auto BOOLEAN NOT NULL DEFAULT 0")
 
         if "to_bell_google_accounts" in inspector.get_table_names():
             gaccount_cols = {c["name"] for c in inspector.get_columns("to_bell_google_accounts")}

@@ -1,4 +1,8 @@
-const CACHE_NAME = "tobell-v1";
+// キャッシュ名は「中身の世代」。戦略を変えたら必ず上げること（古い世代は activate で消える）。
+const CACHE_NAME = "tobell-v2";
+
+// オフラインでも ToBell が開けるように保持する資産。
+// 画像は変化しないが CSS/JS はデプロイで変わるため、fetch 側は network-first にする。
 const STATIC_ASSETS = [
   "/static/to_bell/to_bell.css",
   "/static/to_bell/to_bell.js",
@@ -7,6 +11,15 @@ const STATIC_ASSETS = [
   "/static/img/android-chrome-512x512.png",
   "/static/img/apple-touch-icon.png",
 ];
+
+// このワーカーは push 通知のために scope "/" で登録される。しかしキャッシュまで
+// サイト全体に効かせると、CloudShift や PowerImager など他ツールの静的ファイルまで
+// 巻き込んで固定してしまう。キャッシュ対象は ToBell が使う資産だけに限定する。
+const CACHEABLE_PREFIXES = ["/static/to_bell/", "/static/img/"];
+
+function isCacheable(pathname) {
+  return CACHEABLE_PREFIXES.some(function (prefix) { return pathname.startsWith(prefix); });
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -28,20 +41,29 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// network-first + キャッシュフォールバック。
+// 以前は cache-first だったため、一度取得した JS/CSS が更新されず、デプロイしても
+// 古いままになっていた（PWAの「リロード」を押すまで直らない）。
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   var url = new URL(event.request.url);
-  if (!url.pathname.startsWith("/static/")) return;
+  if (url.origin !== self.location.origin) return;
+  if (!isCacheable(url.pathname)) return;
   event.respondWith(
-    caches.match(event.request).then(function (cached) {
-      return cached || fetch(event.request).then(function (response) {
-        if (response.ok) {
+    fetch(event.request)
+      .then(function (response) {
+        if (response && response.ok) {
           var clone = response.clone();
           caches.open(CACHE_NAME).then(function (cache) { cache.put(event.request, clone); });
         }
         return response;
-      });
-    })
+      })
+      .catch(function () {
+        return caches.match(event.request).then(function (cached) {
+          if (cached) return cached;
+          return Response.error();
+        });
+      })
   );
 });
 

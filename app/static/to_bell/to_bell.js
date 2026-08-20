@@ -9,6 +9,9 @@
     projects: [],
     calMonth: startOfMonth(new Date()),
     isPwa: document.body.classList.contains("tobell-pwa-mode"),
+    currentUser: (document.querySelector("[data-tb-user]") || {}).dataset?.tbUser || "",
+    // 共有リンク（ログイン不要）で開いているか。サーバー側で拒否される操作は出さない。
+    isShare: ((document.querySelector("[data-tb-share]") || {}).dataset?.tbShare || "0") === "1",
     swRegistration: null,
     foregroundTimer: 0,
   };
@@ -183,6 +186,20 @@
     if (state.selectedTaskId) {
       const selected = state.tasks.find((task) => task.id === state.selectedTaskId);
       if (selected) renderDetail(selected);
+      else await openTaskFromLink(state.selectedTaskId);
+    }
+  }
+
+  // 通知（プッシュ／アプリ内）のリンクは /tools/to_bell?task=<id> で開く。
+  // 対象が現在のフィルタに含まれない（連携タスク・完了済み・別プロジェクトなど）
+  // ことは普通にあるので、一覧に無ければ単体で取得して詳細を開く。
+  async function openTaskFromLink(taskId) {
+    if (!taskId) return;
+    try {
+      const task = await api(`/tools/to_bell/api/tasks/${taskId}`);
+      renderDetail(task);
+    } catch (_) {
+      state.selectedTaskId = 0;
     }
   }
 
@@ -217,9 +234,12 @@
   // 特定プロジェクトに絞り込み中・完了/連携フィルタでは出さない。
   function datedProjectsForList() {
     if (state.projectFilter) return [];
-    if (state.filter === "done" || state.filter === "integrations") return [];
+    if (["done", "integrations", "archived"].includes(state.filter)) return [];
+    // 検索中はタスクと同じ条件で絞る（以前は検索しても無関係なプロジェクトが残った）。
+    const q = (($("tb-search") || {}).value || "").trim().toLowerCase();
     return state.projects
       .filter((project) => project.due_at && project.status !== "archived")
+      .filter((project) => !q || `${project.name || ""} ${project.description || ""}`.toLowerCase().includes(q))
       .slice()
       .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime());
   }
@@ -272,7 +292,7 @@
     }
     const projectHtml = projectCards.map(projectTaskCardHtml).join("");
     list.innerHTML = projectHtml + state.tasks.map((task) => {
-      const due = task.due_at ? formatDue(task.due_at) : "通知なし";
+      const due = taskDueText(task);
       const done = task.status === "done" ? "checked" : "";
       const badgeClass = task.priority === "urgent" || isOverdue(task) ? "danger" : (task.priority === "high" ? "warning" : "");
       const pinned = task.pinned ? "is-pinned" : "";
@@ -363,7 +383,7 @@
       } else {
         tasks.forEach((task) => cards.appendChild(buildKanbanCard(task)));
       }
-      if (!state.isPwa) bindColumnDrop(col, column.key);
+      if (!state.isPwa && !isMobile()) bindColumnDrop(col, column.key);
       board.appendChild(col);
     });
     container.replaceChildren(board);
@@ -374,9 +394,12 @@
     card.className = "tobell-kan-card";
     card.dataset.taskId = task.id;
     const overdue = isOverdue(task) ? "danger" : (task.priority === "urgent" ? "danger" : (task.priority === "high" ? "warning" : ""));
-    const due = task.due_at ? formatDueShort(task.due_at) : "";
+    const due = task.due_at ? formatDueShort(task.due_at, task.due_all_day) : "";
     let moveControl = "";
-    if (state.isPwa) {
+    // タッチ端末では HTML5 のドラッグ＆ドロップが効かない。PWA だけでなく、
+    // 通常のモバイルブラウザでも select で状態を移動できるようにする。
+    const useSelectMove = state.isPwa || isMobile();
+    if (useSelectMove) {
       // スマホはドラッグの代わりにネイティブ select で状態を移動する。
       const options = KANBAN_COLUMNS.map((column) =>
         `<option value="${column.key}" ${column.key === task.status ? "selected" : ""}>${esc(column.label)}へ</option>`
@@ -399,7 +422,7 @@
       move.addEventListener("change", () => changeTaskStatus(task.id, move.value));
       move.addEventListener("click", (event) => event.stopPropagation());
     }
-    if (!state.isPwa) {
+    if (!useSelectMove) {
       card.addEventListener("dragstart", (event) => {
         event.dataTransfer.setData("text/plain", String(task.id));
         card.classList.add("is-dragging");
@@ -571,14 +594,18 @@
   function taskMenuItems(taskId) {
     const task = state.tasks.find((item) => item.id === taskId);
     const done = task && task.status === "done";
-    return [
+    const items = [
       { label: "開く", action: () => openTaskById(taskId) },
       {
         label: done ? "↩ 未完了に戻す" : "✓ 完了にする",
         action: () => toggleTaskComplete(taskId, !done),
       },
-      { label: "🗑 タスクを削除", danger: true, action: () => deleteTaskById(taskId) },
     ];
+    // 完全削除は共有リンクからは行えない（サーバー側で 403）。押せる形で出さない。
+    if (!state.isShare) {
+      items.push({ label: "🗑 タスクを削除", danger: true, action: () => deleteTaskById(taskId) });
+    }
+    return items;
   }
 
   function projectMenuItems(projectId) {
@@ -672,6 +699,7 @@
   function openTaskById(id) {
     const task = state.tasks.find((item) => item.id === id);
     if (task) renderDetail(task);
+    else openTaskFromLink(id);
   }
 
   // ===== プロジェクト =====
@@ -709,6 +737,7 @@
       bindProjectReorder(list);
     }
     renderProjectBar();
+    syncQuickAddProjectHint();
     const modal = $("tb-projects-modal");
     if (modal && !modal.hasAttribute("hidden")) renderProjectsListModal();
   }
@@ -782,7 +811,27 @@
     state.selectedTaskId = 0;
     closeDetail();
     renderProjects();
+    syncQuickAddProjectHint();
     loadTasks();
+  }
+
+  function currentProject() {
+    if (!state.projectFilter) return null;
+    return state.projects.find((item) => item.id === state.projectFilter) || null;
+  }
+
+  // プロジェクトを開いている間は、追加したタスクがそのプロジェクトに入ることを明示する。
+  function syncQuickAddProjectHint() {
+    const form = $("tb-quick-form");
+    if (!form) return;
+    const project = currentProject();
+    const title = form.elements.title;
+    if (title) {
+      title.placeholder = project
+        ? `「${project.name}」にタスクを追加`
+        : "タスク名だけで追加できます";
+    }
+    form.classList.toggle("has-project", !!project);
   }
 
   function initProjectsListModal() {
@@ -1099,7 +1148,7 @@
       return;
     }
     list.innerHTML = bulkAssign.tasks.map((task) => {
-      const due = task.due_at ? formatDue(task.due_at) : "通知なし";
+      const due = taskDueText(task);
       const checked = bulkAssign.selected.has(task.id) ? "checked" : "";
       const projectName = task.project ? esc(task.project.name) : "未設定";
       return `
@@ -1192,15 +1241,34 @@
       list.innerHTML = '<div class="tobell-empty">テンプレートはまだありません。</div>';
       return;
     }
-    list.innerHTML = rows.map((tpl) => `
+    // 公開範囲の変更・削除は作成者のみ。他人の所属共有テンプレートには出さない
+    // （出しても 400 になるだけで、押した人には理由が分からない）。
+    list.innerHTML = rows.map((tpl) => {
+      const owned = tpl.owner_id === state.currentUser;
+      return `
       <div class="tobell-template-row" data-template-id="${tpl.id}">
         <div class="tobell-template-main">
           <strong>${esc(tpl.name)}</strong>
-          <span class="tobell-template-meta">${tpl.scope === "office" ? "所属共有" : "自分のみ"} / サブタスク${Number(tpl.subtask_count || 0)}件</span>
+          <span class="tobell-template-meta">${tpl.scope === "office" ? "所属共有" : "自分のみ"} / サブタスク${Number(tpl.subtask_count || 0)}件${owned ? "" : ` / ${esc(tpl.owner_id || "")}さん作成`}</span>
         </div>
+        ${owned ? `<button type="button" class="tobell-btn" data-template-scope="${tpl.id}" data-scope="${esc(tpl.scope)}" title="公開範囲を切り替え">${tpl.scope === "office" ? "所属共有→自分のみ" : "自分のみ→所属共有"}</button>` : ""}
         <button type="button" class="tobell-btn tobell-btn-primary" data-template-use="${tpl.id}">使う</button>
-        <button type="button" class="tobell-btn tobell-danger" data-template-del="${tpl.id}" aria-label="削除">×</button>
-      </div>`).join("");
+        ${owned ? `<button type="button" class="tobell-btn tobell-danger" data-template-del="${tpl.id}" aria-label="削除">×</button>` : ""}
+      </div>`;
+    }).join("");
+    list.querySelectorAll("[data-template-scope]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          const next = button.dataset.scope === "office" ? "private" : "office";
+          await api(`/tools/to_bell/api/templates/${button.dataset.templateScope}`, { method: "PUT", body: { scope: next } });
+          await loadTemplates();
+          showFlash(next === "office" ? "所属内で共有しました" : "自分のみに変更しました", "success");
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
     list.querySelectorAll("[data-template-use]").forEach((button) => {
       button.addEventListener("click", () => instantiateTemplate(Number(button.dataset.templateUse)));
     });
@@ -1226,7 +1294,8 @@
     const btn = form.querySelector('[type="submit"]');
     if (btn) btn.disabled = true;
     try {
-      await api("/tools/to_bell/api/templates", { method: "POST", body: { name } });
+      const scope = form.elements.scope ? form.elements.scope.value : "private";
+      await api("/tools/to_bell/api/templates", { method: "POST", body: { name, scope } });
       form.reset();
       await loadTemplates();
       showFlash("テンプレートを作成しました", "success");
@@ -1255,6 +1324,8 @@
     form.elements.priority.value = task.priority || "normal";
     form.elements.due_at.value = task.due_at ? task.due_at.slice(0, 16) : "";
     form.elements.assigned_to.value = task.assigned_to || "";
+    if (form.elements.reviewer_id) form.elements.reviewer_id.value = task.reviewer_id || "";
+    setupAllDayToggle(form, task);
     fillProjectSelect(form.elements.project_id, task.project ? task.project.id : "");
     form.elements.tags.value = (task.tags || []).map((tag) => tag.name).join(", ");
     if (form.elements.pinned) form.elements.pinned.checked = !!task.pinned;
@@ -1271,6 +1342,35 @@
     if (backButton) backButton.addEventListener("click", closeDetail);
     $("tb-detail").querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", detailAction));
     renderMain();
+  }
+
+  // 終日タスクは 23:59:59 として保存される。datetime-local は秒を持てないため、
+  // 開いてそのまま保存すると 23:59:00 になり「時刻を指定した＝通知する」タスクに
+  // 化けてしまう。終日チェックを一緒に送ることで、無変更保存でも終日を維持する。
+  function setupAllDayToggle(form, task) {
+    const toggle = form.querySelector("[data-due-all-day]");
+    const dueInput = form.elements.due_at;
+    if (!toggle || !dueInput) return;
+    toggle.checked = !!task.due_all_day;
+    const syncDisabled = () => {
+      // 終日のときは時刻部分に意味がないことを見た目でも示す。
+      dueInput.classList.toggle("is-all-day", toggle.checked);
+    };
+    syncDisabled();
+    toggle.addEventListener("change", () => {
+      if (toggle.checked && dueInput.value) {
+        dueInput.value = `${dueInput.value.slice(0, 10)}T23:59`;
+      }
+      syncDisabled();
+    });
+    // 利用者が時刻を触ったら、終日ではなくなったとみなす。
+    dueInput.addEventListener("input", () => {
+      if (!toggle.checked) return;
+      if (dueInput.value.slice(11, 16) !== "23:59") {
+        toggle.checked = false;
+        syncDisabled();
+      }
+    });
   }
 
   // ===== 添付ビューワ =====
@@ -1357,8 +1457,40 @@
     const rows = task.attachments || [];
     if (!rows.length) {
       container.innerHTML = '<div class="tobell-empty">添付はありません。</div>';
-      return;
+    } else {
+      renderAttachmentRows(container, rows);
     }
+    // 25MB超で FILEPOST に退避したファイルも、同じ「添付」欄に並べる。
+    // 以前は「FILEPOSTへ保存しました」と出るのに詳細のどこにも現れず、
+    // 「紐付け」モーダルを開かないと存在に気づけなかった。
+    loadTaskExternalFiles(task.id, container).catch(() => {});
+  }
+
+  async function loadTaskExternalFiles(taskId, container) {
+    if (!taskId) return;
+    let files = [];
+    try {
+      const data = await api(`/tools/to_bell/api/integrations/filepost/files?target_type=task&target_id=${taskId}`);
+      files = data.files || [];
+    } catch (_) {
+      return; // 連携OFF・権限なし・共有セッションでは 403/400。何も足さない。
+    }
+    if (!files.length || state.selectedTaskId !== taskId) return;
+    // 直接添付が0件のときは「添付はありません。」が出ている。FILEPOST 側にファイルが
+    // あるなら、その空表示は取り除く（「ありません」と一覧が並ぶのはおかしい）。
+    const empty = container.querySelector(".tobell-empty");
+    if (empty) empty.remove();
+    const wrap = document.createElement("div");
+    wrap.className = "tobell-attachment-external";
+    wrap.innerHTML = files.map((row) => `
+      <div class="tobell-attachment">
+        <a href="${esc(row.private_url)}" target="_blank" rel="noopener">📎 ${esc(row.file_name)}</a>
+        <span class="tobell-attachment-size">${formatFileSize(row.file_size)} ・ FILEPOST</span>
+      </div>`).join("");
+    container.appendChild(wrap);
+  }
+
+  function renderAttachmentRows(container, rows) {
     container.innerHTML = rows.map((item) => {
       const previewable = viewerKind(item) ? '1' : '';
       return `
@@ -1525,12 +1657,14 @@
     if (btn) btn.disabled = true;
     try {
       const payload = Object.fromEntries(new FormData(form).entries());
-      // プロジェクトが選択されている状態で追加したら、そのプロジェクトに自動で紐づける。
+      // プロジェクトを開いている状態で追加したら、そのプロジェクトのタスクにする。
       if (state.projectFilter) payload.project_id = state.projectFilter;
       await api("/tools/to_bell/api/tasks", { method: "POST", body: payload });
       form.reset();
+      syncQuickAddProjectHint();
       await loadTasks();
-      showFlash("タスクを追加しました", "success");
+      const project = currentProject();
+      showFlash(project ? `「${project.name}」にタスクを追加しました` : "タスクを追加しました", "success");
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -1564,8 +1698,14 @@
     if (form.elements.title) form.elements.title.value = data.title || "";
     if (form.elements.due_date) form.elements.due_date.value = data.due_date || "";
     if (form.elements.due_time) form.elements.due_time.value = data.due_time || "";
-    // プロジェクトが選択中なら、その紐付けを初期選択にする。
+    // プロジェクトを開いている状態で追加したら、そのプロジェクトのタスクにする。
     fillProjectSelect(form.elements.project_id, state.projectFilter || (data.project_id || ""));
+    const hint = form.querySelector("[data-newtask-project-hint]");
+    if (hint) {
+      const project = currentProject();
+      hint.hidden = !project;
+      if (project) hint.textContent = `「${project.name}」のタスクとして追加します（プロジェクト欄で変更できます）。`;
+    }
     modal.removeAttribute("hidden");
     if (form.elements.title) form.elements.title.focus();
   }
@@ -1600,6 +1740,9 @@
       const payload = Object.fromEntries(new FormData(form).entries());
       payload.tags = payload.tags || "";
       payload.pinned = form.elements.pinned ? form.elements.pinned.checked : false;
+      const allDay = form.querySelector("[data-due-all-day]");
+      payload.due_all_day = allDay ? allDay.checked : false;
+      if (form.elements.reviewer_id) payload.reviewer_id = form.elements.reviewer_id.value || "";
       await api(`/tools/to_bell/api/tasks/${payload.id}`, { method: "PUT", body: payload });
       await refreshSelectedTask();
       await loadTasks();
@@ -1646,7 +1789,7 @@
       await loadNotifications();
       showFlash({
         complete: "完了にしました",
-        reopen: "未完了に戻しました",
+        reopen: state.filter === "archived" ? "アーカイブから戻しました" : "未完了に戻しました",
         archive: "アーカイブしました",
         delete: "削除しました",
       }[action] || "更新しました", "success");
@@ -1715,11 +1858,58 @@
     if (!container) return;
     const data = await api("/tools/to_bell/api/notifications");
     const rows = data.notifications || [];
-    container.innerHTML = rows.length ? rows.slice(0, NOTIFICATION_DISPLAY_LIMIT).map((item) => `
-      <div class="tobell-notification">
-        <strong>${esc(item.title)}</strong>
-        <div>${linkify(item.body)}</div>
-      </div>`).join("") : '<div class="tobell-empty">通知はありません。</div>';
+    if (!rows.length) {
+      container.innerHTML = '<div class="tobell-empty">通知はありません。</div>';
+      return;
+    }
+    container.innerHTML = rows.slice(0, NOTIFICATION_DISPLAY_LIMIT).map((item) => `
+      <div class="tobell-notification ${item.is_read ? "is-read" : "is-unread"} ${item.is_resolved ? "is-resolved" : ""}" data-notification-id="${item.id}">
+        <div class="tobell-notification-main" data-notification-open="${item.id}" role="button" tabindex="0">
+          <strong>${esc(item.title)}</strong>
+          <div>${linkify(item.body)}</div>
+        </div>
+        ${item.is_resolved ? "" : `<button type="button" class="tobell-notification-resolve" data-notification-resolve="${item.id}" aria-label="対応済みにする" title="対応済みにする">✓</button>`}
+      </div>`).join("");
+    // 通知をクリックしたら対象を開く（href は /tools/to_bell?task=… / ?project_id=…）。
+    container.querySelectorAll("[data-notification-open]").forEach((el) => {
+      const open = () => openNotification(rows.find((row) => row.id === Number(el.dataset.notificationOpen)));
+      el.addEventListener("click", open);
+      el.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
+      });
+    });
+    container.querySelectorAll("[data-notification-resolve]").forEach((btn) => {
+      btn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        btn.disabled = true;
+        try {
+          await api(`/tools/to_bell/api/notifications/${btn.dataset.notificationResolve}/resolve`, { method: "POST" });
+          await Promise.all([loadNotifications(), loadTasks()]);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  async function openNotification(item) {
+    if (!item) return;
+    if (!item.is_read) {
+      try {
+        await api(`/tools/to_bell/api/notifications/${item.id}/read`, { method: "POST" });
+      } catch (_) { /* 既読化に失敗しても遷移は続ける */ }
+    }
+    const href = String(item.href || "");
+    const taskMatch = href.match(/[?&]task=(\d+)/);
+    const projectMatch = href.match(/[?&]project_id=(\d+)/);
+    if (taskMatch) {
+      await openTaskFromLink(Number(taskMatch[1]));
+    } else if (projectMatch) {
+      selectProject(Number(projectMatch[1]));
+    } else if (href && !href.startsWith("/tools/to_bell")) {
+      window.open(href, "_blank", "noopener");
+    }
+    await Promise.all([loadNotifications(), loadTasks()]);
   }
 
   async function readAllNotifications() {
@@ -1807,7 +1997,8 @@
       await refreshNotifyToggle();
       // プッシュ購読済みならサーバーが通知するので前面監視は不要。
       // 購読がない（権限だけ付与済み等）場合のフォールバックとして動かす。
-      if ($("tb-enable-push-notify") && $("tb-enable-push-notify").dataset.state !== "on") {
+      const pushToggle = $("tb-enable-push-notify");
+      if (!pushToggle || pushToggle.dataset.state !== "on") {
         startForegroundWatch();
       }
     });
@@ -2038,9 +2229,13 @@
   }
 
   // 通知済みフラグ（toBellNotified:*）は放置すると localStorage に溜まり続けるため、
-  // 7日より古いエントリを掃除する。
+  // 一定期間より古いエントリを掃除する。
+  const NOTIFIED_KEY_TTL_MS = 65 * 24 * 60 * 60 * 1000;
+
   function pruneNotifiedKeys() {
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    // サーバー側の期限監視窓（60日）より短くすると、同じタスクに対して
+    // 前面通知が繰り返し出てしまう。窓より長い期間だけ保持する。
+    const cutoff = Date.now() - NOTIFIED_KEY_TTL_MS;
     const stale = [];
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
@@ -2300,14 +2495,18 @@
     }
     container.innerHTML = settingsState.catalog.map((item) => {
       const on = !!settingsState.integrations[item.key];
+      // 連携先ツール（社員名簿PLUS / 現場リストPLUS / ShifterSync）のアクセス権が
+      // 無い場合は ON にできない。理由が分かるように明示する。
+      const available = item.available !== false;
       return `
-        <div class="tobell-integration-row">
+        <div class="tobell-integration-row ${available ? "" : "is-locked"}">
           <div class="tobell-integration-meta">
             <span class="tobell-integration-label">${esc(item.label)}</span>
             <span class="tobell-integration-tool">${esc(item.tool)}</span>
             <div class="tobell-integration-desc">${esc(item.description)}</div>
+            ${available ? "" : `<div class="tobell-integration-locked">「${esc(item.requires_tool || item.tool)}」を利用する権限がないため使えません。管理者に付与を依頼してください。</div>`}
           </div>
-          <button type="button" class="tobell-switch ${on ? "is-on" : ""}" data-integration-key="${esc(item.key)}" aria-pressed="${on}"></button>
+          <button type="button" class="tobell-switch ${on ? "is-on" : ""}" data-integration-key="${esc(item.key)}" aria-pressed="${on}" ${available ? "" : "disabled"}></button>
         </div>`;
     }).join("");
     container.querySelectorAll("[data-integration-key]").forEach((btn) => {
@@ -2591,8 +2790,34 @@
       const data = await api("/tools/to_bell/api/google/import", { method: "POST" });
       if (data && data.status) googleState.status = data.status;
       const r = (data && data.result) || {};
-      showFlash(`取り込み完了: 新規${r.created || 0} / 更新${r.updated || 0} / 完了${r.completed || 0}`, "success");
+      const created = Number(r.created || 0);
+      const updated = Number(r.updated || 0);
+      const skipped = Number(r.skipped || 0);
+      let message = `取り込み完了: 新規${created} / 更新${updated} / 完了${Number(r.completed || 0)}`;
+      if (skipped) message += ` / 対象外${skipped}`;
+      if (!created && !updated && skipped) {
+        message += "（取り込む範囲の条件に合う予定がありませんでした）";
+      }
+      showFlash(message, created || updated ? "success" : "info");
       renderGooglePanel();
+      // 取り込んだ予定は「🔗 連携」フィルタに入る。取り込み直後に一覧を切り替えて、
+      // 「実行したのに何も出てこない」状態にならないようにする。
+      if (created || updated) {
+        state.filter = "integrations";
+        state.view = "list";
+        // 取り込んだ予定はプロジェクトに属さない。絞り込みを残したままだと
+        // 「新規N件」と出た直後に空の一覧が表示されてしまう。
+        state.projectFilter = 0;
+        state.selectedTaskId = 0;
+        closeDetail();
+        document.querySelectorAll(".tobell-filter").forEach((item) => {
+          item.classList.toggle("is-active", item.dataset.filter === "integrations");
+        });
+        syncViewButtons();
+        renderProjects();
+        const settings = $("tb-settings-modal");
+        if (settings) settings.setAttribute("hidden", "");
+      }
       await loadTasks();
     } catch (_) {
       // api() が flash 表示する
@@ -2989,29 +3214,46 @@
   }
 
   function isOverdue(task) {
-    return task.due_at && task.status !== "done" && new Date(task.due_at).getTime() < Date.now();
+    // 期日を指定せずに追加したタスクへ自動で入れた日付（due_auto）は締切ではないので、
+    // 期限切れ扱い（赤バッジ）にしない。サーバー側の「期限切れ」フィルタと同じ基準。
+    if (!task.due_at || task.status === "done" || task.due_auto) return false;
+    return new Date(task.due_at).getTime() < Date.now();
   }
 
-  function formatDue(value) {
+  // 終日タスク（時刻未指定）は 23:59:59 として保存される。表示では時刻を出さない。
+  function isAllDayValue(value) {
+    return typeof value === "string" && value.slice(11, 19) === "23:59:59";
+  }
+
+  function formatDue(value, allDay) {
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value.slice(0, 16).replace("T", " ");
+    if (Number.isNaN(date.getTime())) return String(value || "").slice(0, 16).replace("T", " ");
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, "0");
     const d = String(date.getDate()).padStart(2, "0");
+    const dateText = `${y}-${m}-${d}`;
+    if (allDay === undefined ? isAllDayValue(value) : allDay) return `${dateText} 終日`;
     const hh = String(date.getHours()).padStart(2, "0");
     const mm = String(date.getMinutes()).padStart(2, "0");
-    return `${y}-${m}-${d} ${hh}:${mm}`;
+    return `${dateText} ${hh}:${mm}`;
   }
 
-  function formatDueShort(value) {
+  function taskDueText(task) {
+    if (!task.due_at) return "期日なし";
+    const text = formatDue(task.due_at, task.due_all_day);
+    // 自動で入った日付は締切ではないことを明示する（期限切れにもならない）。
+    return task.due_auto ? `${text}（自動）` : text;
+  }
+
+  function formatDueShort(value, allDay) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
     const m = String(date.getMonth() + 1).padStart(2, "0");
     const d = String(date.getDate()).padStart(2, "0");
+    if (allDay === undefined ? isAllDayValue(value) : allDay) return `${m}/${d}`;
     const hh = String(date.getHours()).padStart(2, "0");
     const mm = String(date.getMinutes()).padStart(2, "0");
-    const time = hh === "23" && mm === "59" ? "" : ` ${hh}:${mm}`;
-    return `${m}/${d}${time}`;
+    return `${m}/${d} ${hh}:${mm}`;
   }
 
   function startOfMonth(date) {

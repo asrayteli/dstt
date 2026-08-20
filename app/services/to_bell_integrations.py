@@ -62,6 +62,68 @@ INTEGRATION_KEYS = {
 FILEPOST_OVERFLOW_THRESHOLD = 25 * 1024 * 1024
 
 
+# 連携キー → その連携が読み書きする DSTT ツール。
+#
+# ここに載るツールは access_control 上 sensitive（個別付与が必要）なので、
+# 「ToBell の個人トグルがON」だけを条件にすると権限の抜け道になる。たとえば
+#   * pluslist / siteplus … ToBell の検索APIから名簿・現場マスタを全件引ける
+#   * shiftersync (CloudShift) … 休暇種別変更申請・要代務シフト帳の更新が、
+#     オプトインした「全ユーザー」へブロードキャストされる（宛先が自己選択できる）
+# トグルは利用者が自分で押せるため、ツール自体のアクセス権も必須にする。
+#
+# 健診PLUS（health_check.linkage）はここに入れない。宛先は健診レコード側
+# （管理担当者＋営業所の健康診断担当＋レコード個別の追加宛先）で決まり、
+# 利用者が自分で宛先に入り込むことはできない。トグルは「自分宛の通知を受け取るか」
+# を切り替えるだけなので、ここでゲートすると担当者への通知を止めるだけになる。
+INTEGRATION_TOOL_REQUIREMENTS = {
+    "cloudshift.leave_change_request": "shiftersync",
+    "cloudshift.shift_update": "shiftersync",
+    "pluslist.linkage": "pluslist",
+    "siteplus.linkage": "siteplus",
+}
+
+
+def has_tool_access(username: str, integration_key: str) -> bool:
+    """連携先ツールへのアクセス権があるか。ツール指定の無い連携は常に True。"""
+    tool_key = INTEGRATION_TOOL_REQUIREMENTS.get(integration_key)
+    if tool_key is None:
+        return True
+    cache = _tool_access_cache()
+    cache_key = (username, tool_key)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+    try:
+        from app.access_control import username_has_tool_access
+
+        allowed = username_has_tool_access(username, tool_key)
+    except Exception:  # noqa: BLE001 - 判定できないときは安全側（不許可）
+        allowed = False
+    if cache is not None:
+        cache[cache_key] = allowed
+    return allowed
+
+
+def _tool_access_cache():
+    """リクエスト内でのアクセス権判定のメモ化（健診の日次スイープ対策）。"""
+    try:
+        from flask import g, has_app_context
+
+        if not has_app_context():
+            return None
+        cache = getattr(g, "_tb_tool_access_cache", None)
+        if cache is None:
+            cache = {}
+            g._tb_tool_access_cache = cache
+        return cache
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def allowed_integration_keys(username: str) -> set[str]:
+    """この利用者が使ってよい連携キー。"""
+    return {key for key in INTEGRATION_KEYS if has_tool_access(username, key)}
+
+
 def _ensure_settings(username: str) -> ToBellUserSettings:
     row = ToBellUserSettings.query.filter_by(username=username).first()
     if row is None:
@@ -76,11 +138,21 @@ def get_settings(username: str) -> dict[str, Any]:
     row = ToBellUserSettings.query.filter_by(username=username).first()
     integrations = (row.integrations if row and isinstance(row.integrations, dict) else {}) or {}
     preferences = (row.preferences if row and isinstance(row.preferences, dict) else {}) or {}
+    allowed = allowed_integration_keys(username)
     return {
-        "integrations": {key: bool(integrations.get(key, False)) for key in INTEGRATION_KEYS},
+        # 連携先ツールへのアクセス権が無いものは、フラグが立っていても「無効」として返す。
+        # （権限を外されたあともフラグだけ残っている、という状態を画面に出さない）
+        "integrations": {
+            key: bool(integrations.get(key, False)) and key in allowed for key in INTEGRATION_KEYS
+        },
         "preferences": preferences,
         "catalog": [
-            {"key": key, **meta}
+            {
+                "key": key,
+                **meta,
+                "available": key in allowed,
+                "requires_tool": INTEGRATION_TOOL_REQUIREMENTS.get(key),
+            }
             for key, meta in INTEGRATION_KEYS.items()
         ],
     }
@@ -92,8 +164,9 @@ def update_integrations(username: str, payload: dict[str, Any]) -> dict[str, Any
         incoming = {}
     row = _ensure_settings(username)
     current = dict(row.integrations or {})
+    allowed = allowed_integration_keys(username)
     for key, value in incoming.items():
-        if key in INTEGRATION_KEYS:
+        if key in INTEGRATION_KEYS and key in allowed:
             current[key] = bool(value)
     row.integrations = current
     db.session.commit()
@@ -130,24 +203,37 @@ def invalidate_settings_cache(username: str | None = None) -> None:
         if not has_app_context():
             return
         cache = getattr(g, "_tb_settings_cache", None)
-        if not cache:
-            return
-        if username is None:
-            cache.clear()
-        else:
-            cache.pop(username, None)
+        if cache:
+            if username is None:
+                cache.clear()
+            else:
+                cache.pop(username, None)
+        access_cache = getattr(g, "_tb_tool_access_cache", None)
+        if access_cache:
+            if username is None:
+                access_cache.clear()
+            else:
+                for key in [k for k in access_cache if k[0] == username]:
+                    access_cache.pop(key, None)
     except Exception:
         pass
 
 
 def is_enabled(username: str, integration_key: str) -> bool:
-    """ユーザー個人の連携許可フラグ。未設定は常にFalse。"""
+    """ユーザー個人の連携許可フラグ。未設定は常にFalse。
+
+    連携先ツールが sensitive な場合は、そのツールへのアクセス権も必須にする。
+    フラグだけを見ると、利用者が自分でトグルを押すだけで sensitive ツールの
+    データに到達できてしまうため、判定はここに一本化している。
+    """
     if integration_key not in INTEGRATION_KEYS:
         return False
     row = _settings_row_cached(username)
     if row is None or not isinstance(row.integrations, dict):
         return False
-    return bool(row.integrations.get(integration_key, False))
+    if not bool(row.integrations.get(integration_key, False)):
+        return False
+    return has_tool_access(username, integration_key)
 
 
 def enabled_users(integration_key: str) -> list[str]:
@@ -155,12 +241,26 @@ def enabled_users(integration_key: str) -> list[str]:
     if integration_key not in INTEGRATION_KEYS:
         return []
     rows = ToBellUserSettings.query.all()
-    result: list[str] = []
-    for row in rows:
-        integrations = row.integrations if isinstance(row.integrations, dict) else {}
-        if integrations.get(integration_key):
-            result.append(row.username)
-    return result
+    candidates = [
+        row.username
+        for row in rows
+        if (row.integrations if isinstance(row.integrations, dict) else {}).get(integration_key)
+    ]
+    if not candidates:
+        return []
+    tool_key = INTEGRATION_TOOL_REQUIREMENTS.get(integration_key)
+    if tool_key is None:
+        return candidates
+    # アクセス権判定はユーザーごとに所属・付与を引くため、対象者を一度にまとめて解決する
+    # （1人ずつ判定すると、CloudShift の一斉通知が人数ぶんの全件スキャンを伴う）。
+    from app.access_control import usernames_with_tool_access
+
+    allowed = usernames_with_tool_access(candidates, tool_key)
+    cache = _tool_access_cache()
+    if cache is not None:
+        for username in candidates:
+            cache[(username, tool_key)] = username in allowed
+    return [username for username in candidates if username in allowed]
 
 
 # 健診PLUSの通知種別（source_ref_type と一致）。
