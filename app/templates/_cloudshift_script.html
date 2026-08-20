@@ -53,14 +53,12 @@
         templatesLoaded: false,
         templateApply: null
       },
-      leaveSync: {
-        calendars: [],
-        selectedCalendarId: ''
-      },
       shiftBookSettings: {
         activeTab: 'requests',
         loaded: false,
-        settings: { leave_change_requests: { enabled: false } },
+        settings: { leave_change_requests: { enabled: false }, leave_sync: { calendar_id: '', option_keys: [] } },
+        leaveCalendars: [],
+        leaveOptions: [],
         requests: [],
         approvedRequestIds: [],
         accountShares: null,
@@ -1311,11 +1309,6 @@
       });
     }
 
-    function selectedLeaveCalendarId() {
-      const node = $('cloud-sync-calendar');
-      return node ? node.value : state.leaveSync.selectedCalendarId;
-    }
-
     function titleFieldRefs(kind) {
       const inputId = kind === 'create' ? 'cloud-create-title' : 'cloud-project-title';
       const inputEl = $(inputId);
@@ -2055,10 +2048,12 @@
       refs.nameInput.removeAttribute('data-site-id');
       refs.nameInput.removeAttribute('data-site-row-id');
       refs.nameInput.removeAttribute('data-selected-site-name');
+      refs.nameInput.removeAttribute('data-site-branches');
       if (refs.note) {
         refs.note.textContent = '';
         refs.note.classList.add('cloud-hidden');
       }
+      updateBulkBranchOptions(form);
     }
 
     function applyBulkEmployeeCandidate(form, candidate) {
@@ -2089,6 +2084,7 @@
       refs.nameInput.dataset.selectedSiteName = siteName;
       refs.nameInput.dataset.siteId = siteId;
       refs.nameInput.dataset.siteRowId = String(candidate.site_row_id || candidate.id || '').trim();
+      refs.nameInput.dataset.siteBranches = JSON.stringify(Array.isArray(candidate.branches) ? candidate.branches : []);
       if (refs.note) {
         refs.note.textContent = siteId ? `契約番号: ${siteId}` : '';
         refs.note.classList.toggle('cloud-hidden', !siteId);
@@ -2097,6 +2093,7 @@
         refs.panel.innerHTML = '';
         refs.panel.classList.add('cloud-hidden');
       }
+      updateBulkBranchOptions(form);
     }
 
     function renderBulkEmployeeCandidates(form, candidates) {
@@ -2134,8 +2131,10 @@
       }
       const normalized = (Array.isArray(candidates) ? candidates : [])
         .map((item) => ({
+          site_row_id: String(item.site_row_id || item.id || '').trim(),
           site_id: String(item.site_id || '').trim(),
-          site_name: String(item.site_name || '').trim()
+          site_name: String(item.site_name || '').trim(),
+          branches: Array.isArray(item.branches) ? item.branches : []
         }))
         .filter((item) => item.site_name);
       if (!normalized.length) {
@@ -2151,6 +2150,8 @@
             class="cloud-bulk-site-candidate"
             data-site-name="${escapeHtml(candidate.site_name)}"
             data-site-id="${escapeHtml(candidate.site_id)}"
+            data-site-row-id="${escapeHtml(candidate.site_row_id)}"
+            data-site-branches="${escapeHtml(JSON.stringify(candidate.branches))}"
             style="display:block; width:100%; text-align:left; border:1px solid var(--cloud-line); border-radius:10px; background:#fff; color:var(--cloud-text); padding:8px 10px; cursor:pointer; margin:0 0 6px;"
           >${escapeHtml(label)}</button>
         `;
@@ -3384,6 +3385,11 @@
     }
 
     function buildAssistSceneConflictNotice(item) {
+      const conflicts = Array.isArray(item && item.scene_conflicts) ? item.scene_conflicts : [];
+      const shiftLines = conflicts.map((conflict) => [
+        String(conflict.project_title || '').trim(),
+        String(conflict.shift_label || '').trim()
+      ].filter(Boolean).join('・')).filter(Boolean);
       const siteNames = Array.isArray(item && item.scene_conflict_site_names)
         ? item.scene_conflict_site_names.map((name) => String(name || '').trim()).filter(Boolean)
         : [];
@@ -3391,7 +3397,7 @@
       return `
         <div class="cloud-assist-conflict-note">
           <strong>同日競合あり</strong>
-          <p class="cloud-panel-note">競合先現場: ${escapeHtml(siteNames.join(' / '))}</p>
+          <p class="cloud-panel-note">勤務中: ${escapeHtml((shiftLines.length ? shiftLines : siteNames).join(' / '))}</p>
         </div>
       `;
     }
@@ -3448,7 +3454,8 @@
                   data-day-assist-top-shift="${escapeHtml(String(shiftKey || ''))}"
                   data-day-assist-top-name="${escapeHtml(candidate.name || '')}"
                   data-day-assist-top-employee="${escapeHtml(candidate.employee_number || '')}"
-                >この候補を入れる</button>
+                  ${candidate && candidate.has_scene_conflict ? 'disabled' : ''}
+                >${candidate && candidate.has_scene_conflict ? '同日勤務あり' : 'この候補を入れる'}</button>
               </div>
             </div>
             <div class="cloud-assist-result-meta">
@@ -3704,16 +3711,38 @@
       `;
     }
 
+    function assistExperienceSiteKey(site) {
+      return String(site && (site.site_row_id || site.site_id || site.site_name) || '').trim().toLowerCase();
+    }
+
+    function assistPersonSiteGroups() {
+      const data = currentAssistData();
+      const experienced = Array.isArray(data.experienced_sites) ? data.experienced_sites : [];
+      const substitute = experienced.filter((site) => String(site.shift_key || '').toUpperCase() === 'SUB');
+      const substituteKeys = new Set(substitute.map((site) => assistExperienceSiteKey(site)).filter(Boolean));
+      const trained = experienced.filter((site) => (
+        String(site.shift_key || '').toUpperCase() === 'TRAIN'
+        && !substituteKeys.has(assistExperienceSiteKey(site))
+      ));
+      return {
+        substitute,
+        trained,
+        trainingRequired: Array.isArray(data.training_sites) ? data.training_sites : []
+      };
+    }
+
     function openAssistSiteDetailPopup(siteType) {
       const data = currentAssistData();
-      const counts = assistCounts();
-      const isTraining = siteType === 'training';
-      const sites = isTraining
-        ? (Array.isArray(data.training_sites) ? data.training_sites : [])
-        : (Array.isArray(data.experienced_sites) ? data.experienced_sites : []);
-      const typeLabel = isTraining ? '研修要現場' : '経験済み現場';
-      const count = isTraining ? (counts.training || 0) : (counts.experienced || 0);
-      const emptyText = isTraining ? '研修要現場はありません。' : '経験済み現場はまだありません。';
+      const groups = assistPersonSiteGroups();
+      const config = siteType === 'substitute-experience'
+        ? { sites: groups.substitute, label: '経験済み現場（代務）', empty: '代務経験のある現場はまだありません。' }
+        : siteType === 'training-experience'
+          ? { sites: groups.trained, label: '経験済み現場（研修）', empty: '研修経験のみの現場はまだありません。' }
+          : { sites: groups.trainingRequired, label: '研修要現場', empty: '研修要現場はありません。' };
+      const sites = config.sites;
+      const typeLabel = config.label;
+      const count = sites.length;
+      const emptyText = config.empty;
       const modal = openCloudModal('cloud-assist-site-detail-modal', `${typeLabel}（${count}）`);
       const panel = modal.querySelector('.cloud-modal-panel');
       if (panel) panel.classList.add('cloud-modal-panel-wide');
@@ -3725,37 +3754,45 @@
     }
 
     function buildAssistPersonDetailsPanel() {
-      const data = currentAssistData();
-      const counts = assistCounts();
-      const experienced = Array.isArray(data.experienced_sites) ? data.experienced_sites : [];
-      const training = Array.isArray(data.training_sites) ? data.training_sites : [];
+      const groups = assistPersonSiteGroups();
+      const substitute = groups.substitute;
+      const trained = groups.trained;
+      const trainingRequired = groups.trainingRequired;
       return `
         <div class="cloud-assist-stack cloud-assist-person-stack">
           <div class="cloud-assist-section">
             <div class="cloud-assist-subhead">
               <div>
                 <strong>登録状況の詳細</strong>
-                <p class="cloud-panel-note">この人の「経験済み現場」と「研修要現場」を確認できます。代務・研修の第二オプションを付けたシフトは、経験済み現場として自動で反映されます。</p>
+                <p class="cloud-panel-note">代務経験と研修経験を分けて確認できます。代務済みの現場は研修経験側には重ねて表示しません（研修実績のデータ自体は保持されます）。</p>
               </div>
             </div>
             <div class="cloud-assist-summary-row">
-              <span class="cloud-note-chip">経験済み現場 ${counts.experienced || 0}件</span>
-              <span class="cloud-note-chip">研修要現場 ${counts.training || 0}件</span>
+              <span class="cloud-note-chip">代務経験 ${substitute.length}件</span>
+              <span class="cloud-note-chip">研修経験 ${trained.length}件</span>
+              <span class="cloud-note-chip">研修要現場 ${trainingRequired.length}件</span>
             </div>
           </div>
           <div class="cloud-assist-section">
             <div class="cloud-assist-subhead">
-              <div><strong>経験済み現場（${counts.experienced || 0}）</strong></div>
-              <button type="button" class="cloud-btn secondary cloud-assist-expand-btn" data-assist-expand-sites="experienced">拡大表示</button>
+              <div><strong>経験済み現場（代務）（${substitute.length}）</strong></div>
+              <button type="button" class="cloud-btn secondary cloud-assist-expand-btn" data-assist-expand-sites="substitute-experience">拡大表示</button>
             </div>
-            ${buildAssistPersonSiteTable(experienced, '経験済み現場はまだありません。')}
+            ${buildAssistPersonSiteTable(substitute, '代務経験のある現場はまだありません。')}
           </div>
           <div class="cloud-assist-section">
             <div class="cloud-assist-subhead">
-              <div><strong>研修要現場（${counts.training || 0}）</strong></div>
+              <div><strong>経験済み現場（研修）（${trained.length}）</strong></div>
+              <button type="button" class="cloud-btn secondary cloud-assist-expand-btn" data-assist-expand-sites="training-experience">拡大表示</button>
+            </div>
+            ${buildAssistPersonSiteTable(trained, '研修経験のみの現場はまだありません。')}
+          </div>
+          <div class="cloud-assist-section">
+            <div class="cloud-assist-subhead">
+              <div><strong>研修要現場（${trainingRequired.length}）</strong></div>
               <button type="button" class="cloud-btn secondary cloud-assist-expand-btn" data-assist-expand-sites="training">拡大表示</button>
             </div>
-            ${buildAssistPersonSiteTable(training, '研修要現場はありません。')}
+            ${buildAssistPersonSiteTable(trainingRequired, '研修要現場はありません。')}
           </div>
         </div>
       `;
@@ -4704,6 +4741,9 @@
     function buildAssistSearchResultAction(item, index) {
       if (!canAppendAssistSearchResultToDay()) return '';
       const day = assistTargetDayFromContext();
+      if (item && item.has_scene_conflict) {
+        return '<button type="button" class="cloud-btn secondary" disabled>同日勤務あり</button>';
+      }
       return `
         <button
           type="button"
@@ -6784,13 +6824,32 @@
       if (!branchField || !branchSelect) return;
 
       const project = currentProject();
-      if (!project || project.mode !== 'scene') {
+      if (!project || !['scene', 'person'].includes(project.mode)) {
         branchField.classList.add('cloud-hidden');
         return;
       }
 
       const optionKey = (form.querySelector('[name="bulk_option"]') || {}).value || '';
-      const candidates = siteBranchCandidatesForOption(optionKey);
+      let availableBranches = currentProjectSiteBranches();
+      if (project.mode === 'person') {
+        const nameInput = form.querySelector('[name="bulk_name"]');
+        try {
+          availableBranches = JSON.parse(String(nameInput && nameInput.dataset.siteBranches || '[]'))
+            .map((branch) => normalizeSiteBranchCandidate(branch)).filter(Boolean);
+        } catch (_) {
+          availableBranches = [];
+        }
+        if (!String(nameInput && nameInput.dataset.siteRowId || '').trim()) {
+          branchField.classList.add('cloud-hidden');
+          return;
+        }
+      }
+      branchField.classList.remove('cloud-hidden');
+      const normalizedOption = String(optionKey || '').trim().toUpperCase();
+      const matchedBranches = normalizedOption
+        ? availableBranches.filter((branch) => branch.cloudshift_option_key === normalizedOption)
+        : availableBranches;
+      const candidates = matchedBranches.length ? matchedBranches : availableBranches;
       const previousValue = normalizeSiteBranchRowId(branchSelect.value);
       branchSelect.innerHTML = ['<option value="">未設定</option>']
         .concat(candidates.map((branch) => (
@@ -7376,7 +7435,12 @@
           event.stopPropagation();
           applyBulkSiteCandidate(form, {
             site_name: siteCandidate.getAttribute('data-site-name') || '',
-            site_id: siteCandidate.getAttribute('data-site-id') || ''
+            site_id: siteCandidate.getAttribute('data-site-id') || '',
+            site_row_id: siteCandidate.getAttribute('data-site-row-id') || '',
+            branches: (() => {
+              try { return JSON.parse(siteCandidate.getAttribute('data-site-branches') || '[]'); }
+              catch (_) { return []; }
+            })()
           });
         }
       });
@@ -7386,95 +7450,6 @@
       updateBulkBranchOptions(form);
       updateBulkRangeCopyHighlights(form);
       updateBulkPreview(form);
-    }
-
-    function renderLeaveSyncControls() {
-      const row = $('cloud-leave-sync-row');
-      const select = $('cloud-sync-calendar');
-      const button = $('cloud-sync-leaves');
-      if (!row || !select || !button) {
-        return;
-      }
-
-      const visible = PAGE.type === 'owner' && canEditCurrentProject() && isPersonProject() && !!currentMonth();
-      row.classList.toggle('cloud-hidden', !visible);
-      if (!visible) {
-        select.innerHTML = '';
-        button.disabled = true;
-        return;
-      }
-
-      const calendars = state.leaveSync.calendars || [];
-      if (!calendars.length) {
-        select.innerHTML = '<option value="">営業所がありません</option>';
-        select.disabled = true;
-        button.disabled = true;
-        return;
-      }
-
-      if (!state.leaveSync.selectedCalendarId || !calendars.some((item) => item.calendar_id === state.leaveSync.selectedCalendarId)) {
-        state.leaveSync.selectedCalendarId = calendars[0].calendar_id;
-      }
-
-      select.innerHTML = calendars.map((item) => `
-        <option value="${escapeHtml(item.calendar_id)}" ${item.calendar_id === state.leaveSync.selectedCalendarId ? 'selected' : ''}>
-          ${escapeHtml(item.name || item.calendar_id)}
-        </option>
-      `).join('');
-      select.disabled = false;
-      button.disabled = !selectedLeaveCalendarId();
-    }
-
-    async function loadLeaveSyncCalendars(projectId) {
-      const project = currentProject();
-      const canLoadLeaveSync = PAGE.type === 'owner'
-        && projectId
-        && project
-        && String(project.id || '') === String(projectId)
-        && projectAccessRole(project) === 'owner'
-        && isPersonProject();
-      if (!canLoadLeaveSync) {
-        state.leaveSync.calendars = [];
-        state.leaveSync.selectedCalendarId = '';
-        renderLeaveSyncControls();
-        return;
-      }
-
-      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}/leave-sync/calendars`);
-      state.leaveSync.calendars = data.calendars || [];
-      if (!state.leaveSync.calendars.some((item) => item.calendar_id === state.leaveSync.selectedCalendarId)) {
-        state.leaveSync.selectedCalendarId = state.leaveSync.calendars[0] ? state.leaveSync.calendars[0].calendar_id : '';
-      }
-      renderLeaveSyncControls();
-    }
-
-    async function syncCurrentMonthLeaves() {
-      const project = currentProject();
-      const month = currentMonth();
-      const calendarId = selectedLeaveCalendarId();
-      if (!project || !month) {
-        return;
-      }
-      if (!calendarId) {
-        showFlash('営業所を選択してください', 'error');
-        return;
-      }
-
-      const result = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/leave-sync/${month.year}/${month.month}`, {
-        method: 'POST',
-        body: {
-          calendar_id: calendarId
-        }
-      });
-
-      let message = `月次マネージャーへ反映しました: 登録 ${result.created_total} 件 / 置換削除 ${result.removed_total} 件`;
-      if (result.skipped_total) {
-        message += ` / スキップ ${result.skipped_total} 件`;
-      }
-      showFlash(message, result.skipped_total ? 'info' : 'success');
-      if (project.id) {
-        await loadHistory(project.id);
-      }
     }
 
     async function requestSubstituteFromEntry(context) {
@@ -7635,7 +7610,6 @@
         resetAssistState();
         if ($('cloud-editor-panel')) $('cloud-editor-panel').innerHTML = '';
         updateCurrentProjectLabel();
-        renderLeaveSyncControls();
         if (PAGE.type === 'owner') renderHistory([]);
         return;
       }
@@ -7699,8 +7673,6 @@
         $('cloud-required-capacity').value = month ? (month.required_capacity || 0) : 0;
         $('cloud-required-capacity').disabled = !isOwnerEditable;
       }
-
-      renderLeaveSyncControls();
 
       if ($('cloud-capacity-field')) {
         $('cloud-capacity-field').classList.toggle('cloud-hidden', PAGE.accessMode !== 'edit' || project.mode === 'large');
@@ -7834,11 +7806,6 @@
         if (window.console && console.error) console.error('loadProjects failed', error);
       }
       try {
-        await loadLeaveSyncCalendars(projectId);
-      } catch (error) {
-        if (window.console && console.error) console.error('loadLeaveSyncCalendars failed', error);
-      }
-      try {
         await loadHistory(projectId);
       } catch (error) {
         if (window.console && console.error) console.error('loadHistory failed', error);
@@ -7869,7 +7836,6 @@
       renderProjectList();
       await renderWorkspaceWithSiteBranches(projectAccessRole(payload.project) !== 'viewer');
       if (projectAccessRole(payload.project) !== 'viewer') {
-        await loadLeaveSyncCalendars(projectId);
         await loadHistory(projectId);
       } else {
         renderHistory([]);
@@ -8017,10 +7983,12 @@
       }
       if (!confirmSceneBranchSave()) return;
 
-      const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}`, {
+      const response = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}`, {
         method: 'PUT',
         body: collectMonthPayload()
-      }));
+      });
+      const payload = unwrapProjectPayload(response);
+      const leaveSync = response.leave_sync || null;
       state.shiftBookSettings.approvedRequestIds = [];
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
@@ -8034,9 +8002,15 @@
       if (await maybeReturnToSyncOrigin(project.id, `${month.year}-${String(month.month).padStart(2, '0')}`)) {
         return;
       }
-      const saveMessage = submittedRequests
+      let saveMessage = submittedRequests
         ? `この月を保存し、代務要請 ${submittedRequests} 件を要代務シフト帳へ登録しました`
         : 'この月を保存しました';
+      if (leaveSync && leaveSync.status === 'synced') {
+        saveMessage += `。有休マネージャーへ ${leaveSync.created_total || 0}件を自動同期しました`;
+      } else if (leaveSync && leaveSync.status === 'failed') {
+        showFlash(leaveSync.message || 'シフトは保存しましたが、有休マネージャーへの自動同期に失敗しました', 'error');
+        return;
+      }
       const needsLargeBaseline = project.mode === 'large' && !(payload.month && payload.month.meta_data && payload.month.meta_data.baseline);
       showFlash(needsLargeBaseline
         ? `${saveMessage}。初回シフトを確定した場合は「現在を基準版に確定」して、以後の変更を見分けられるようにしてください。`
@@ -8131,14 +8105,22 @@
       if (!month || !(await ensureGuestName())) return;
       if (!confirmSceneBranchSave()) return;
 
-      const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/public/edit/${PAGE.token}/month/${month.year}/${month.month}`, {
+      const response = await requestJson(`/tools/shiftersync/cloudshift/api/public/edit/${PAGE.token}/month/${month.year}/${month.month}`, {
         method: 'PUT',
         body: Object.assign(collectMonthPayload(), { editor_name: state.guestName })
-      }));
+      });
+      const payload = unwrapProjectPayload(response);
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       await renderWorkspaceWithSiteBranches(true);
-      showFlash('この月を保存しました', 'success');
+      const leaveSync = response.leave_sync || null;
+      if (leaveSync && leaveSync.status === 'failed') {
+        showFlash(leaveSync.message || 'シフトは保存しましたが、有休マネージャーへの自動同期に失敗しました', 'error');
+      } else if (leaveSync && leaveSync.status === 'synced') {
+        showFlash(`この月を保存し、有休マネージャーへ ${leaveSync.created_total || 0}件を自動同期しました`, 'success');
+      } else {
+        showFlash('この月を保存しました', 'success');
+      }
     }
 
     async function openSyncedSourceEntry(entry) {
@@ -8202,6 +8184,10 @@
     async function createMonth(targetKey, ownerMode) {
       const project = currentProject();
       if (!project) return;
+      if (ownerMode && projectAccessRole(project) !== 'owner') {
+        showFlash('共有されたシフト帳では新しい月を追加できません', 'info');
+        return;
+      }
 
       const parsed = parseMonthKey(targetKey);
       if (!parsed) {
@@ -8280,7 +8266,7 @@
         return;
       }
 
-      if (!ownerMode && PAGE.accessMode !== 'edit') {
+      if (!ownerMode) {
         showFlash('その月はまだ作成されていません', 'info');
         return;
       }
@@ -8315,8 +8301,6 @@
       state.projectPayload = null;
       state.baseMonth = null;
       resetAssistState();
-      state.leaveSync.calendars = [];
-      state.leaveSync.selectedCalendarId = '';
       await loadProjects();
       renderHistory([]);
       renderWorkspace(true);
@@ -8401,10 +8385,14 @@
     }
 
     function employeeShareNumbersFromForm(form) {
-      return String((form.querySelector('[name="share_employee_numbers"]') || {}).value || '')
+      const manual = String((form.querySelector('[name="share_employee_numbers"]') || {}).value || '')
         .split(/[\s,、]+/)
         .map((value) => value.trim())
         .filter(Boolean);
+      const selected = Array.from(form.querySelectorAll('[name="share_office_candidates"] option:checked'))
+        .map((option) => String(option.value || '').trim())
+        .filter(Boolean);
+      return Array.from(new Set(manual.concat(selected)));
     }
 
     function accountShareFormHtml(data) {
@@ -8412,6 +8400,12 @@
       const office = shares.office || {};
       const employees = Array.isArray(shares.employees) ? shares.employees : [];
       const ownerOffices = Array.isArray(data.owner_offices) ? data.owner_offices : [];
+      const officeCandidates = Array.isArray(data.office_candidates) ? data.office_candidates : [];
+      const selectedNumbers = new Set(employees.map((item) => String(item.employee_number || '').trim()));
+      const candidateNumbers = new Set(officeCandidates.map((item) => String(item.employee_number || '').trim()));
+      const manualNumbers = employees
+        .map((item) => String(item.employee_number || '').trim())
+        .filter((number) => number && !candidateNumbers.has(number));
       return `
         <form class="cloud-share-form">
           <p class="cloud-panel-note">DSTTアカウントを持っている人向けの共有です。共有URLはアカウントがない人向けとして残します。</p>
@@ -8423,8 +8417,18 @@
             </span>
           </label>
           <label class="cloud-field">
-            <span>特定社員宛（社員番号）</span>
-            <textarea name="share_employee_numbers" class="cloud-input cloud-share-textarea" rows="4" placeholder="例: 3243012&#10;複数指定は改行・カンマ区切り">${escapeHtml(employees.map((item) => item.employee_number).join('\n'))}</textarea>
+            <span>同じ営業所内から選択</span>
+            <input name="share_candidate_query" class="cloud-input" type="search" placeholder="氏名または社員番号で絞り込み">
+            <select name="share_office_candidates" class="cloud-input cloud-share-candidate-select" multiple size="8">
+              ${officeCandidates.length
+                ? officeCandidates.map((item) => `<option value="${escapeHtml(item.employee_number)}" data-search-text="${escapeHtml(`${item.name || ''} ${item.employee_number || ''}`.toLowerCase())}" ${selectedNumbers.has(String(item.employee_number || '').trim()) ? 'selected' : ''}>${escapeHtml(`${item.name || item.employee_number} / ${item.employee_number}`)}</option>`).join('')
+                : '<option value="" disabled>選択できるDSTTアカウントがありません</option>'}
+            </select>
+            <small class="cloud-field-note">Ctrl（MacはCommand）を押しながらクリックすると複数選択できます。</small>
+          </label>
+          <label class="cloud-field">
+            <span>特定社員宛（社員番号を直接指定）</span>
+            <textarea name="share_employee_numbers" class="cloud-input cloud-share-textarea" rows="4" placeholder="例: 3243012&#10;複数指定は改行・カンマ区切り">${escapeHtml(manualNumbers.join('\n'))}</textarea>
           </label>
           <div class="cloud-share-current">
             <h4>現在の共有先</h4>
@@ -8438,6 +8442,20 @@
       `;
     }
 
+    function bindAccountShareCandidateSearch(root) {
+      const form = root.querySelector('.cloud-share-form');
+      if (!form) return;
+      const query = form.querySelector('[name="share_candidate_query"]');
+      const select = form.querySelector('[name="share_office_candidates"]');
+      if (!query || !select) return;
+      query.addEventListener('input', () => {
+        const needle = String(query.value || '').trim().toLowerCase();
+        Array.from(select.options).forEach((option) => {
+          option.hidden = !!needle && !String(option.getAttribute('data-search-text') || '').includes(needle);
+        });
+      });
+    }
+
     function renderAccountShareModalBody(modal, data) {
       modalBody(modal).innerHTML = accountShareFormHtml(data);
       modalFooter(modal).innerHTML = `
@@ -8448,6 +8466,7 @@
       modalFooter(modal).querySelector('[data-cloud-share-save]').addEventListener('click', () => {
         saveAccountShares(modal).catch((error) => showFlash(error.message, 'error'));
       });
+      bindAccountShareCandidateSearch(modal);
     }
 
     async function openAccountShareModal() {
@@ -8769,8 +8788,6 @@
       state.projectPayload = null;
       state.baseMonth = null;
       resetAssistState();
-      state.leaveSync.calendars = [];
-      state.leaveSync.selectedCalendarId = '';
       await loadProjects();
       renderHistory([]);
       renderWorkspace(true);
@@ -8807,11 +8824,15 @@
       const requests = state.shiftBookSettings.requests || [];
       const unviewedCount = unviewedLeaveChangeRequestCount(project);
       const supportsLeaveRequests = project && project.mode === 'person';
+      const supportsLeaveSync = project && project.mode === 'person';
       // 現場シフトは複数人が閲覧するため、通知先（ViewPWA 購読端末）を閲覧・編集できる。
       const supportsPushTargets = project && project.mode === 'scene';
       const hasMonth = !!currentMonth();
       let activeTab = state.shiftBookSettings.activeTab || (supportsLeaveRequests ? 'requests' : 'share');
       if (!supportsLeaveRequests && (activeTab === 'requests' || activeTab === 'general')) {
+        activeTab = 'share';
+      }
+      if (!supportsLeaveSync && activeTab === 'leave-sync') {
         activeTab = 'share';
       }
       if (!supportsPushTargets && activeTab === 'notify') {
@@ -8827,6 +8848,7 @@
         <div class="cloud-settings-tabs" role="tablist">
           ${supportsLeaveRequests ? `<button type="button" class="cloud-settings-tab ${activeTab === 'requests' ? 'is-active' : ''} cloud-notify-host" data-shift-settings-tab="requests">休暇種別変更申請${tabBadge}</button>` : ''}
           ${supportsLeaveRequests ? `<button type="button" class="cloud-settings-tab ${activeTab === 'general' ? 'is-active' : ''}" data-shift-settings-tab="general">申請設定</button>` : ''}
+          ${supportsLeaveSync ? `<button type="button" class="cloud-settings-tab ${activeTab === 'leave-sync' ? 'is-active' : ''}" data-shift-settings-tab="leave-sync">有休連携</button>` : ''}
           <button type="button" class="cloud-settings-tab ${activeTab === 'share' ? 'is-active' : ''}" data-shift-settings-tab="share">シフト帳共有</button>
           <button type="button" class="cloud-settings-tab ${activeTab === 'owner' ? 'is-active' : ''}" data-shift-settings-tab="owner">オーナー変更</button>
           <button type="button" class="cloud-settings-tab ${activeTab === 'urls' ? 'is-active' : ''}" data-shift-settings-tab="urls">共有URL</button>
@@ -8843,6 +8865,33 @@
                   <small>閲覧URLから既存休暇の種別変更だけ申請できます。</small>
                 </span>
               </label>
+            </section>
+          </div>
+        ` : ''}
+        ${activeTab === 'leave-sync' && supportsLeaveSync ? `
+          <div class="cloud-settings-panel">
+            <section class="cloud-settings-card">
+              <p class="cloud-panel-note">「この月を保存」したとき、選択した休暇だけを有休マネージャーへ自動同期します。対象から外した休暇は次回保存時に連携先から削除されます。</p>
+              <label class="cloud-field">
+                <span>反映先の営業所</span>
+                <select name="leave_sync_calendar_id" class="cloud-input" ${state.shiftBookSettings.leaveCalendars.length ? '' : 'disabled'}>
+                  ${state.shiftBookSettings.leaveCalendars.length
+                    ? state.shiftBookSettings.leaveCalendars.map((calendar) => `<option value="${escapeHtml(calendar.calendar_id)}" ${calendar.calendar_id === ((settings.leave_sync || {}).calendar_id || state.shiftBookSettings.leaveCalendars[0].calendar_id) ? 'selected' : ''}>${escapeHtml(calendar.name || calendar.calendar_id)}</option>`).join('')
+                    : '<option value="">利用できる営業所がありません</option>'}
+                </select>
+              </label>
+              <div class="cloud-field">
+                <span>同期する休暇オプション</span>
+                <div class="cloud-share-candidate-list">
+                  ${state.shiftBookSettings.leaveOptions.map((option) => `
+                    <label class="cloud-check-row">
+                      <input type="checkbox" name="leave_sync_option_key" value="${escapeHtml(option.key)}" ${(settings.leave_sync && settings.leave_sync.option_keys || []).includes(option.key) ? 'checked' : ''}>
+                      <span>${escapeHtml(option.label)}</span>
+                    </label>
+                  `).join('')}
+                </div>
+              </div>
+              <small class="cloud-field-note">初期設定は「公休」以外がオンです。</small>
             </section>
           </div>
         ` : ''}
@@ -8914,7 +8963,7 @@
       `;
       modalFooter(modal).innerHTML = `
         <button type="button" class="cloud-btn secondary" data-shift-settings-close>閉じる</button>
-        ${activeTab === 'general' ? '<button type="button" class="cloud-btn primary" data-shift-settings-save>保存</button>' : ''}
+        ${activeTab === 'general' || activeTab === 'leave-sync' ? '<button type="button" class="cloud-btn primary" data-shift-settings-save>保存</button>' : ''}
         ${activeTab === 'share' ? '<button type="button" class="cloud-btn primary" data-shift-settings-save-share>共有設定を保存</button>' : ''}
         ${activeTab === 'owner' && (state.ownerTransfer.info || {}).can_transfer ? '<button type="button" class="cloud-btn primary" data-owner-transfer-submit disabled>オーナーを変更する</button>' : ''}
         ${activeTab === 'restore' ? '<button type="button" class="cloud-btn primary" data-shift-settings-restore>復元</button>' : ''}
@@ -9022,6 +9071,7 @@
     }
 
     function bindShiftBookSettingsModalEvents(modal) {
+      bindAccountShareCandidateSearch(modal);
       modal.querySelectorAll('[data-shift-settings-tab]').forEach((button) => {
         button.addEventListener('click', () => {
           state.shiftBookSettings.activeTab = button.getAttribute('data-shift-settings-tab') || 'requests';
@@ -9101,6 +9151,8 @@
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/settings`);
       state.shiftBookSettings.loaded = true;
       state.shiftBookSettings.settings = data.settings || { leave_change_requests: { enabled: false } };
+      state.shiftBookSettings.leaveCalendars = Array.isArray(data.leave_calendars) ? data.leave_calendars : [];
+      state.shiftBookSettings.leaveOptions = Array.isArray(data.leave_options) ? data.leave_options : [];
       state.shiftBookSettings.requests = data.leave_change_requests || [];
       applyShiftBookSettingsPayload(data);
       state.shiftBookSettings.accountShares = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/account-shares`);
@@ -9166,10 +9218,22 @@
     async function saveShiftBookSettings(modal) {
       const project = currentProject();
       if (!project) return;
-      const enabled = !!modal.querySelector('[name="leave_change_requests_enabled"]')?.checked;
+      const enabledInput = modal.querySelector('[name="leave_change_requests_enabled"]');
+      const enabled = enabledInput
+        ? !!enabledInput.checked
+        : !!(state.shiftBookSettings.settings.leave_change_requests || {}).enabled;
+      const calendarSelect = modal.querySelector('[name="leave_sync_calendar_id"]');
+      const selectedOptionInputs = Array.from(modal.querySelectorAll('[name="leave_sync_option_key"]'));
+      const leaveSync = state.shiftBookSettings.settings.leave_sync || { calendar_id: '', option_keys: [] };
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/settings`, {
         method: 'PUT',
-        body: { leave_change_requests_enabled: enabled }
+        body: {
+          leave_change_requests_enabled: enabled,
+          leave_sync_calendar_id: calendarSelect ? calendarSelect.value : leaveSync.calendar_id,
+          leave_sync_option_keys: selectedOptionInputs.length
+            ? selectedOptionInputs.filter((input) => input.checked).map((input) => input.value)
+            : leaveSync.option_keys
+        }
       });
       state.shiftBookSettings.settings = data.settings || state.shiftBookSettings.settings;
       state.shiftBookSettings.requests = data.leave_change_requests || state.shiftBookSettings.requests;
@@ -10108,19 +10172,6 @@
         event.preventDefault();
         openAssistDayActionModal(button.getAttribute('data-day')).catch((error) => showFlash(error.message, 'error'));
       });
-
-      const syncCalendar = $('cloud-sync-calendar');
-      if (syncCalendar) {
-        syncCalendar.addEventListener('change', (event) => {
-          state.leaveSync.selectedCalendarId = event.target.value || '';
-          renderLeaveSyncControls();
-        });
-      }
-
-      const syncLeaves = $('cloud-sync-leaves');
-      if (syncLeaves) {
-        syncLeaves.addEventListener('click', () => syncCurrentMonthLeaves().catch((error) => showFlash(error.message, 'error')));
-      }
 
       const prevMonth = $('cloud-prev-month');
       if (prevMonth) prevMonth.addEventListener('click', () => navigateMonth(-1, true).catch((error) => showFlash(error.message, 'error')));

@@ -193,6 +193,19 @@ def test_resolve_shift_times_uses_branch_as_per_field_override():
     }
 
 
+def test_resolve_shift_times_uses_branch_when_parent_site_is_blank():
+    site = {"attendance_times": [], "report_time": ""}
+    branch = {
+        "attendance_times": [{"start": "08:00", "end": "17:00"}],
+        "report_time": "07:30",
+    }
+
+    assert resolve_shift_times(site, branch) == {
+        "attendance_times": [{"start": "08:00", "end": "17:00"}],
+        "report_time": "07:30",
+    }
+
+
 # ---------------------------------------------------------------- 現場リストPLUS
 
 
@@ -313,6 +326,10 @@ def test_siteplus_cloudshift_apis_expose_resolved_shift_times(tmp_path):
     sites_payload = client.get("/tools/siteplus/api/cloudshift/sites").get_json()["sites"]
     assert sites_payload[0]["attendance_times"] == [{"start": "10:00", "end": "19:00"}]
     assert sites_payload[0]["report_time"] == "09:40"
+    assert sites_payload[0]["branches"][0]["resolved_shift_times"] == {
+        "attendance_times": [{"start": "08:00", "end": "17:00"}],
+        "report_time": "09:40",
+    }
 
     branches_payload = client.get("/tools/siteplus/api/cloudshift/sites/00400/branches").get_json()
     resolved = branches_payload["branches"][0]["resolved_shift_times"]
@@ -547,6 +564,47 @@ def test_cloudshift_branch_override_wins_over_site(tmp_path):
     assert entry["attendance_times"] == [{"start": "08:00", "end": "17:00"}]
     # 枝番号は出勤時間を上書きしていないので親現場を引き継ぐ。
     assert entry["report_time"] == "09:40"
+
+
+def test_cloudshift_person_entry_uses_branch_times_when_parent_site_is_blank(tmp_path):
+    module, app = _build_cloudshift_app(tmp_path)
+    site_row_id = _create_site(
+        app,
+        site_id="12345",
+        site_name="Branch Only Site",
+        attendance_times=[],
+        report_time="",
+    )
+    with app.app_context():
+        branch = SiteBranch(
+            site_row_id=site_row_id,
+            site_branch="001",
+            cloudshift_option_key="O",
+            site_register="owner01",
+            site_updater="owner01",
+            attendance_times=[{"start": "08:00", "end": "17:00"}],
+            report_time="07:30",
+            is_active=True,
+        )
+        db.session.add(branch)
+        db.session.commit()
+        branch_row_id = branch.id
+
+    _client, _project_id, month = _create_person_project_with_entry(
+        module,
+        app,
+        site_row_id=site_row_id,
+        entry_extra={
+            "show_attendance_time": True,
+            "show_report_time": True,
+            "site_branch_row_id": str(branch_row_id),
+            "site_branch": "001",
+        },
+    )
+
+    entry = month["entries_per_day"]["1"][0]
+    assert entry["attendance_times"] == [{"start": "08:00", "end": "17:00"}]
+    assert entry["report_time"] == "07:30"
 
 
 def test_cloudshift_calendar_day_map_places_shift_time_next_to_comment(tmp_path):
@@ -1213,3 +1271,8 @@ def test_shift_time_toggles_live_in_the_option_popup_not_the_add_form():
     assert "shiftTimes.show_attendance_time" in add_entry
     assert "'勤怠'" in add_entry
     assert "'出勤'" in add_entry
+
+    # 個人シフトでも選択した現場の枝一覧を保持し、枝の解決済み時間を使う。
+    assert "data-site-branches" in source
+    assert "shiftTimesForSelectedSiteInput" in source
+    assert "siteBranchCandidatesForOptionFrom" in source

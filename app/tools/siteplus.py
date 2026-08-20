@@ -1419,6 +1419,15 @@ def api_cloudshift_sites():
                     "active_branch_count": len([branch for branch in site.branches if branch.is_active]),
                     "attendance_times": normalize_attendance_times(site.attendance_times),
                     "report_time": normalize_time_text(site.report_time),
+                    "branches": [
+                        {
+                            **branch.to_dict(),
+                            "option_label": _site_option_label(branch.cloudshift_option_key),
+                            "resolved_shift_times": resolve_shift_times(site, branch),
+                        }
+                        for branch in site.branches
+                        if branch.is_active
+                    ],
                 }
                 for site in sites
             ]
