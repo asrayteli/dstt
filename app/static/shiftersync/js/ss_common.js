@@ -448,7 +448,13 @@ const ShifterSync = (function() {
   }
 
   function siteBranchCandidatesForOption(optionKey) {
-    const branches = currentSiteBranches().filter((branch) => branch.is_active !== false);
+    return siteBranchCandidatesForOptionFrom(currentSiteBranches(), optionKey);
+  }
+
+  function siteBranchCandidatesForOptionFrom(sourceBranches, optionKey) {
+    const branches = (Array.isArray(sourceBranches) ? sourceBranches : [])
+      .map((branch) => normalizeSiteBranch(branch))
+      .filter((branch) => branch && branch.is_active !== false);
     if (!branches.length) {
       return [];
     }
@@ -949,7 +955,9 @@ const ShifterSync = (function() {
       site_name: siteName,
       active_branch_count: parseInt(candidate.active_branch_count || candidate.activeBranchCount || '0', 10) || 0,
       // 追加直後にサーバー往復なしで勤怠/出勤を出せるよう、候補の時点で控えておく。
-      shift_times: normalizeShiftTimesPayload(candidate.shift_times || candidate)
+      shift_times: normalizeShiftTimesPayload(candidate.shift_times || candidate),
+      branches: (Array.isArray(candidate.branches) ? candidate.branches : [])
+        .map((branch) => normalizeSiteBranch(branch)).filter(Boolean)
     };
   }
 
@@ -1006,6 +1014,18 @@ const ShifterSync = (function() {
       return { attendance_times: [], report_time: '' };
     }
     return parseShiftTimesAttribute($input.attr('data-site-shift-times'));
+  }
+
+  function getSelectedSiteBranchesForInput($input) {
+    if (!$input || !$input.length) {
+      return [];
+    }
+    try {
+      const raw = JSON.parse(String($input.attr('data-site-branches') || '[]'));
+      return (Array.isArray(raw) ? raw : []).map((branch) => normalizeSiteBranch(branch)).filter(Boolean);
+    } catch (_) {
+      return [];
+    }
   }
 
   function getSelectedSiteDataForInput($input) {
@@ -1347,6 +1367,7 @@ const ShifterSync = (function() {
     $input.removeAttr('data-site-id');
     $input.removeAttr('data-selected-site-name');
     $input.removeAttr('data-site-shift-times');
+    $input.removeAttr('data-site-branches');
     $input.attr('data-search-token', `cleared-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     const note = getEmployeeSelectionNoteForInput($input);
     if (note.length) {
@@ -1364,6 +1385,7 @@ const ShifterSync = (function() {
     $input.attr('data-site-id', normalized.site_id);
     $input.attr('data-selected-site-name', normalized.site_name);
     $input.attr('data-site-shift-times', JSON.stringify(normalized.shift_times));
+    $input.attr('data-site-branches', JSON.stringify(normalized.branches));
     $input.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     const note = getEmployeeSelectionNoteForInput($input);
     if (note.length) {
@@ -1373,6 +1395,9 @@ const ShifterSync = (function() {
     const panel = getEmployeeSearchPanelForInput($input);
     if (panel.length) {
       panel.empty().addClass('ss-hidden');
+    }
+    if (isPersonMode() && String($input.attr('data-search-kind') || '') === 'modal') {
+      refreshEntryModalBranchOptions();
     }
   }
 
@@ -1686,6 +1711,20 @@ const ShifterSync = (function() {
       : { attendance_times: [], report_time: '' };
   }
 
+  function shiftTimesForSelectedSiteInput($input, siteBranchRowId) {
+    const base = getSelectedSiteShiftTimesForInput($input);
+    const branch = getSelectedSiteBranchesForInput($input)
+      .find((item) => item.id === normalizeSiteBranchRowId(siteBranchRowId));
+    const resolved = branch ? normalizeShiftTimesPayload(branch.resolved_shift_times) : null;
+    if (!resolved) {
+      return base;
+    }
+    return {
+      attendance_times: resolved.attendance_times.length ? resolved.attendance_times : base.attendance_times,
+      report_time: resolved.report_time || base.report_time
+    };
+  }
+
   // オプション選択ポップアップ内の「現場の時間表示」セクション。
   // 追加欄に置くと見落とされやすいため、オプションと同じ場所でまとめて設定する。
   function createShiftTimeSection(dayKey) {
@@ -1767,7 +1806,9 @@ const ShifterSync = (function() {
   function shiftTimesForSavedEntry(entry, context) {
     const resolved = isSceneMode()
       ? shiftTimesForNewSceneEntry(context.siteBranchRowId)
-      : (context.selectedSiteTimes || { attendance_times: [], report_time: '' });
+      : (context.selectedSiteInput
+        ? shiftTimesForSelectedSiteInput(context.selectedSiteInput, context.siteBranchRowId)
+        : (context.selectedSiteTimes || { attendance_times: [], report_time: '' }));
     if (resolved.attendance_times.length || resolved.report_time) {
       return resolved;
     }
@@ -2742,7 +2783,7 @@ const ShifterSync = (function() {
     }
 
     const options = getSelectedOptionsForDay(dayKey);
-    const autoBranchFields = isSceneMode() ? autoBranchFieldsForOption(options[0] || null) : { site_branch_row_id: '', site_branch: '' };
+    let autoBranchFields = isSceneMode() ? autoBranchFieldsForOption(options[0] || null) : { site_branch_row_id: '', site_branch: '' };
     let entryName = name;
     let employeeName = isSceneMode() ? name : '';
     let employeeNumber = getSelectedEmployeeNumberForInput(nameInput);
@@ -2794,6 +2835,15 @@ const ShifterSync = (function() {
       employeeNumber = getSelectedEmployeeNumberForInput(personInput);
       siteNameForEntry = selectedSite.site_name || name;
     }
+    if (isPersonMode()) {
+      const branchCandidates = siteBranchCandidatesForOptionFrom(
+        getSelectedSiteBranchesForInput(nameInput),
+        options[0] || null
+      );
+      autoBranchFields = branchCandidates.length === 1
+        ? { site_branch_row_id: branchCandidates[0].id, site_branch: branchCandidates[0].site_branch }
+        : { site_branch_row_id: '', site_branch: '' };
+    }
 
     const entry = normalizeEntry({
       id: makeEntryId(),
@@ -2813,7 +2863,7 @@ const ShifterSync = (function() {
           // 保存時にサーバーが現場マスタの最新値で上書きする。ここでは即時表示用。
           ...(isSceneMode()
             ? shiftTimesForNewSceneEntry(autoBranchFields.site_branch_row_id)
-            : getSelectedSiteShiftTimesForInput(nameInput))
+            : shiftTimesForSelectedSiteInput(nameInput, autoBranchFields.site_branch_row_id))
         }
         : {}),
       ...substitutePayload
@@ -3109,7 +3159,10 @@ const ShifterSync = (function() {
     }
 
     const optionKey = $('#ss-entry-modal-option').val() || '';
-    const candidates = siteBranchCandidatesForOption(optionKey);
+    const availableBranches = isPersonMode()
+      ? getSelectedSiteBranchesForInput($('#ss-entry-modal-name'))
+      : currentSiteBranches();
+    const candidates = siteBranchCandidatesForOptionFrom(availableBranches, optionKey);
     const currentRowId = normalizeSiteBranchRowId(select.attr('data-current-row-id') || '');
     const currentBranch = String(select.attr('data-current-branch') || '').trim();
     const previousValue = normalizeSiteBranchRowId(select.val() || '');
@@ -3146,7 +3199,7 @@ const ShifterSync = (function() {
       select.attr('data-current-row-id', candidates[0].id);
       select.attr('data-current-branch', candidates[0].site_branch);
       setEntryModalBranchMessage(`候補が1件のため 枝${candidates[0].site_branch} を自動選択しました`);
-    } else if (!currentSiteBranches().length) {
+    } else if (!availableBranches.length) {
       setEntryModalBranchMessage('この現場に有効な枝番号がありません');
     } else if (optionKey && !candidates.some((branch) => branch.cloudshift_option_key === String(optionKey).trim().toUpperCase())) {
       setEntryModalBranchMessage('一致する枝番号がないため、登録済みの枝番号をすべて表示しています');
@@ -3253,8 +3306,8 @@ const ShifterSync = (function() {
     const optionText = parsed.optionKey ? allOptionMappings[parsed.optionKey] || parsed.optionKey : '\u306a\u3057';
     const branchState = entryBranchState(entry);
     const siteContext = state.siteContext && typeof state.siteContext === 'object' ? state.siteContext : null;
-    const canChooseBranch = isSceneMode() && !!(siteContext && siteContext.is_linked);
-    const hasBranches = currentSiteBranches().length > 0;
+    const canChooseBranch = (isSceneMode() && !!(siteContext && siteContext.is_linked)) || isPersonMode();
+    const hasBranches = isSceneMode() ? currentSiteBranches().length > 0 : !!branchState.site_branch_row_id;
     const syncedEntry = isSyncedEntry(entry);
     const canOpenSource = canOpenSyncedSourceEntry(entry);
     const selectedSite = {
@@ -3567,6 +3620,10 @@ const ShifterSync = (function() {
       $modalNameInput.attr('data-site-id', selectedSite.site_id);
       $modalNameInput.attr('data-selected-site-name', selectedSite.site_name || modalPrimaryName);
       $modalNameInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+      $modalNameInput.attr('data-site-shift-times', JSON.stringify({
+        attendance_times: entry.attendance_times || [],
+        report_time: entry.report_time || ''
+      }));
     }
 
     const $helperEmployeeInput = $('#ss-entry-modal-helper-employee');
@@ -3599,6 +3656,21 @@ const ShifterSync = (function() {
 
     if (canChooseBranch) {
       refreshEntryModalBranchOptions();
+    }
+
+    if (isPersonMode() && selectedSite.site_id) {
+      fetchSiteCandidates(selectedSite.site_id).then((candidates) => {
+        const matched = (Array.isArray(candidates) ? candidates : [])
+          .map((candidate) => normalizeSiteCandidate(candidate))
+          .find((candidate) => candidate && (
+            candidate.site_row_id === normalizeSiteRowId(selectedSite.site_row_id)
+            || candidate.site_id === selectedSite.site_id
+          ));
+        if (!matched || !$('#ss-entry-modal').is(':visible')) return;
+        $modalNameInput.attr('data-site-shift-times', JSON.stringify(matched.shift_times));
+        $modalNameInput.attr('data-site-branches', JSON.stringify(matched.branches));
+        refreshEntryModalBranchOptions();
+      }).catch(() => {});
     }
 
     $('#ss-entry-modal').removeClass('ss-hidden');
@@ -3727,7 +3799,8 @@ const ShifterSync = (function() {
           : entry.show_report_time === true,
         ...shiftTimesForSavedEntry(entry, {
           siteBranchRowId,
-          selectedSiteTimes: getSelectedSiteShiftTimesForInput($nameInput)
+          selectedSiteTimes: getSelectedSiteShiftTimesForInput($nameInput),
+          selectedSiteInput: $nameInput
         }),
         ...substitutePayloadForSave,
         substitute_requester_user_id: existingEntry.substitute_requester_user_id || '',

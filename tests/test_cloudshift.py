@@ -2394,7 +2394,7 @@ def test_master_shift_targets_can_be_edited_later(tmp_path):
     assert master["people_count"] == 0
 
 
-def test_owner_can_compare_own_cloudshift_projects_for_conflicts(tmp_path):
+def test_scene_save_rejects_same_day_conflict_from_another_scene_book(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
 
@@ -2443,27 +2443,9 @@ def test_owner_can_compare_own_cloudshift_projects_for_conflicts(tmp_path):
     )
 
     assert alpha_save.status_code == 200
-    assert beta_save.status_code == 200
-
-    compare_response = client.post(
-        "/tools/shiftersync/cloudshift/api/conflict-check",
-        json={
-            "month_key": "2026-04",
-            "project_ids": [alpha_id, beta_id],
-        },
-    )
-
-    assert compare_response.status_code == 200
-    payload = compare_response.get_json()
-    assert payload["success"] is True
-    assert payload["mode"] == "scene"
-    assert payload["month_key"] == "2026-04"
-    assert payload["targets"] == ["Alpha Team", "Beta Team"]
-    assert [item["label"] for item in payload["sources"]] == ["Alpha Team", "Beta Team"]
-    assert {item["entry"] for item in payload["conflicts"]} == {"!A!Alice", "!E!Alice"}
-    assert payload["same_site_conflicts"] == []
-    assert payload["matrix"]["1"][0][0]["display"] == "Alice 午前"
-    assert payload["matrix"]["1"][1][0]["display"] == "Alice 早番"
+    assert beta_save.status_code == 409
+    assert "Beta Team" not in beta_save.get_json()["error"]
+    assert "Alpha Team・午前" in beta_save.get_json()["error"]
 
 
 def test_spot_search_separates_leave_options_from_available_people_and_dedupes_synced_entries(tmp_path):
@@ -2660,6 +2642,19 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "blocked_weekdays" in script
     assert "has_scene_conflict" in script
     assert "scene_conflict_site_names" in script
+    assert "同日勤務あり" in script
+    assert "勤務中:" in script
+    assert "経験済み現場（代務）" in script
+    assert "経験済み現場（研修）" in script
+    assert "function assistPersonSiteGroups" in script
+    assert "研修実績のデータ自体は保持されます" in script
+    assert 'data-shift-settings-tab="leave-sync"' in script
+    assert 'name="leave_sync_option_key"' in script
+    assert "初期設定は「公休」以外がオンです" in script
+    assert 'name="share_office_candidates"' in script
+    assert "同じ営業所内から選択" in script
+    assert "cloud-leave-sync-row" not in html
+    assert "cloud-sync-leaves" not in script
     assert "data-assist-edit-profile" in script
     assert "option_aptitude" in script
     assert "data-assist-detail-toggle" in script
@@ -4269,7 +4264,7 @@ def test_owner_can_sync_person_month_leaves_to_leave_mgr(tmp_path):
     assert sync_a.status_code == 200
     sync_a_payload = sync_a.get_json()
     assert sync_a_payload["created_total"] == 2
-    assert sync_a_payload["removed_total"] == 0
+    assert sync_a_payload["removed_total"] == 2
     assert sync_a_payload["skipped_total"] == 0
 
     office_a = _load_leave_calendar(tmp_path, "office_a", "202605")
@@ -4320,6 +4315,110 @@ def test_scene_project_cannot_sync_leaves(tmp_path):
     )
 
     assert sync_response.status_code == 400
+
+
+def test_person_leave_sync_settings_default_and_auto_filter(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    _prepare_leave_mgr_data(tmp_path, "owner01", accessible_calendar_ids=["office_a", "office_b"])
+
+    created = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Auto Leave", "mode": "person", "employee_number": "8101", "year": "2026", "month": "6"},
+    ).get_json()["project"]
+    project_id = created["project"]["id"]
+    settings = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings"
+    ).get_json()
+    assert settings["settings"]["leave_sync"]["option_keys"] == [
+        "PAID", "COMP", "CONDOLENCE", "CARE", "REFRESH", "OTHER"
+    ]
+    assert settings["leave_calendars"][0]["calendar_id"] == "office_a"
+
+    updated = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings",
+        json={
+            "leave_change_requests_enabled": False,
+            "leave_sync_calendar_id": "office_b",
+            "leave_sync_option_keys": ["PAID", "PUBLIC"],
+        },
+    )
+    assert updated.status_code == 200
+
+    entries = dict(created["month"]["entries_per_day"])
+    entries["1"] = [{"id": "paid", "value": "!PAID!有休", "comment": ""}]
+    entries["2"] = [{"id": "public", "value": "!PUBLIC!公休", "comment": ""}]
+    entries["3"] = [{"id": "comp", "value": "!COMP!代休", "comment": ""}]
+    saved = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/6",
+        json={"entries_per_day": entries, "base_month": created["month"]},
+    )
+    assert saved.status_code == 200
+    assert saved.get_json()["leave_sync"]["calendar_id"] == "office_b"
+    office_b = _load_leave_calendar(tmp_path, "office_b", "202606")
+    assert {item["leave_type"] for item in office_b["leaves"]} == {"有休", "公休"}
+
+
+def test_shared_users_and_public_edit_cannot_create_new_month(tmp_path):
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        db.session.add(User(username="2001", password_hash="x", name="Shared User"))
+        db.session.commit()
+    module.current_user = _owner()
+    created = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Owner Only Months", "mode": "person", "employee_number": "8102", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    project_id = created["project"]["id"]
+    edit_token = _token_from_url(created["project"]["urls"]["edit_url"])
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/account-shares",
+        json={"share_office": False, "employee_numbers": ["2001"]},
+    ).status_code == 200
+
+    module.current_user = _employee_user("2001")
+    shared_create = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month",
+        json={"year": 2026, "month": 5},
+    )
+    assert shared_create.status_code == 404
+
+    public_create = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/edit/{edit_token}/month",
+        json={"year": 2026, "month": 5, "editor_name": "Shared User"},
+    )
+    assert public_create.status_code == 403
+
+
+def test_account_share_lists_same_office_dstt_accounts_as_candidates(tmp_path):
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        branch = AccessBranch(name="Candidate Branch", code="CB")
+        db.session.add(branch)
+        db.session.flush()
+        office_a = AccessOffice(branch_id=branch.id, name="Office A", code="CA")
+        office_b = AccessOffice(branch_id=branch.id, name="Office B", code="CB")
+        db.session.add_all([office_a, office_b])
+        db.session.flush()
+        db.session.add_all([
+            User(username="6101", password_hash="x", name="Same Office", office_id=office_a.id),
+            User(username="6102", password_hash="x", name="Other Office", office_id=office_b.id),
+        ])
+        db.session.commit()
+        office_a_id = office_a.id
+
+    module.current_user = _employee_user("owner01", office_id=office_a_id, name="Owner")
+    created = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Share Candidates", "mode": "scene", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    response = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{created['project']['id']}/account-shares"
+    )
+    assert response.status_code == 200
+    assert response.get_json()["office_candidates"] == [
+        {"employee_number": "6101", "name": "Same Office"}
+    ]
 
 
 def test_owner_can_restore_revision_and_snapshot_limit_stays_at_12(tmp_path):

@@ -25,24 +25,12 @@ def _public_template_text() -> str:
     return PUBLIC_TEMPLATE.read_text(encoding="utf-8")
 
 
-def test_public_add_month_buttons_are_wired_in_live_script():
-    """編集URLの「前月を追加」「翌月を追加」ボタンが click ハンドラを持つ。"""
+def test_public_shared_view_does_not_offer_month_creation_buttons():
+    """共有先（編集URLを含む）から新しい月を追加できない。"""
     template = _public_template_text()
-    script = _script_text()
 
-    for button_id in ("cloud-add-prev-month", "cloud-add-next-month"):
-        # テンプレート側にボタンが存在すること（編集URLで描画される）。
-        assert f'id="{button_id}"' in template, f"{button_id} がテンプレートに存在しない"
-        # スクリプト側で同じ ID を取得して addEventListener していること。
-        wired = re.search(
-            r"\$\(\s*['\"]"
-            + re.escape(button_id)
-            + r"['\"]\s*\)[\s\S]{0,400}?addEventListener",
-            script,
-        )
-        assert wired, f"{button_id} がインラインスクリプトで配線されていない"
-        # 月作成フローへ繋がっていること。
-        assert "createMonth(" in script
+    for button_id in ("cloud-add-prev-month", "cloud-add-next-month", "cloud-create-first-month"):
+        assert f'id="{button_id}"' not in template
 
 
 def test_public_interactive_elements_have_handlers_or_form_binding():

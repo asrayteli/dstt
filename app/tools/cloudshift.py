@@ -64,6 +64,7 @@ from app.models import (
     SiteBranch,
     SiteContractMaster,
     User,
+    UserAccessibleOffice,
     db,
 )
 from app.site_shift_times import resolve_shift_times
@@ -117,6 +118,9 @@ OPTION_LABELS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS, **SECOND_OPTI
 SHIFT_TIME_OPTION_KEYS = {"A", "P", "E", "L", "TEMP"}
 VEHICLE_OPTION_KEYS = {"M", "C", "O", "W", "V", "N1", "N2", "N3", "N4", "N5"}
 LEAVE_CHANGE_REQUEST_STATUSES = {"pending", "approved", "rejected"}
+DEFAULT_LEAVE_SYNC_OPTION_KEYS = tuple(
+    key for key in LEAVE_OPTION_MAPPINGS if key != "PUBLIC"
+)
 ASSIST_ROLE_LABELS = {
     "normal": "通常",
     "dedicated": "専従者",
@@ -2647,6 +2651,51 @@ def _employee_label_for_number(employee_number: str) -> str:
     return employee_number
 
 
+def _same_office_share_candidates() -> list[dict[str, str]]:
+    """現在のユーザーと同じ営業所に属する共有可能なDSTTアカウントを返す。"""
+    office_ids = _current_share_office_ids()
+    if not office_ids:
+        return []
+    office_codes = {
+        str(row.code or "").strip()
+        for row in AccessOffice.query.filter(AccessOffice.id.in_(office_ids)).all()
+        if str(row.code or "").strip()
+    }
+    employee_numbers = {
+        str(row.employee_number or "").strip()
+        for row in Employee.query.filter(
+            Employee.office_code.in_(office_codes),
+            Employee.is_deleted.is_(False),
+            Employee.is_retired.is_(False),
+        ).all()
+    } if office_codes else set()
+    direct_user_ids = {
+        int(row.user_id)
+        for row in UserAccessibleOffice.query.filter(
+            UserAccessibleOffice.office_id.in_(office_ids)
+        ).all()
+    }
+    users = User.query.filter(
+        or_(
+            User.office_id.in_(office_ids),
+            User.id.in_(direct_user_ids) if direct_user_ids else False,
+            User.username.in_(employee_numbers) if employee_numbers else False,
+        )
+    ).all()
+    current_number = _user_id()
+    candidates = [
+        {
+            "employee_number": str(user.username or "").strip(),
+            "name": _employee_label_for_number(str(user.username or "").strip()),
+        }
+        for user in users
+        if str(user.username or "").strip()
+        and str(user.username or "").strip() != current_number
+    ]
+    candidates.sort(key=lambda item: (item["name"].casefold(), item["employee_number"]))
+    return candidates
+
+
 def _project_link_key(project: dict[str, Any]) -> tuple[str, str] | None:
     """個人=社員ID、現場=現場 を一意に表す紐づけキーを返す。
 
@@ -2792,10 +2841,24 @@ def _normalized_account_shares(project: dict[str, Any]) -> dict[str, Any]:
 def _shift_book_settings(project: dict[str, Any]) -> dict[str, Any]:
     raw = project.get("shift_book_settings") if isinstance(project.get("shift_book_settings"), dict) else {}
     leave_requests = raw.get("leave_change_requests") if isinstance(raw.get("leave_change_requests"), dict) else {}
+    leave_sync = raw.get("leave_sync") if isinstance(raw.get("leave_sync"), dict) else {}
+    raw_option_keys = leave_sync.get("option_keys")
+    if isinstance(raw_option_keys, list):
+        option_keys = [
+            key
+            for key in LEAVE_OPTION_MAPPINGS
+            if key in {str(value or "").strip().upper() for value in raw_option_keys}
+        ]
+    else:
+        option_keys = list(DEFAULT_LEAVE_SYNC_OPTION_KEYS)
     return {
         "leave_change_requests": {
             "enabled": bool(leave_requests.get("enabled")),
-        }
+        },
+        "leave_sync": {
+            "calendar_id": str(leave_sync.get("calendar_id") or "").strip(),
+            "option_keys": option_keys,
+        },
     }
 
 
@@ -9201,6 +9264,7 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
         results.append(item)
     results.sort(
         key=lambda item: (
+            bool(item.get("has_scene_conflict")),
             -int(item["score"]),
             -int(item["matched_rule_count"]),
             -int(item["matched_record_count"]),
@@ -9334,7 +9398,9 @@ def _leave_option_label(option_key: str | None) -> str | None:
 
 
 def _cloudshift_leave_rows(
-    project: dict[str, Any], month_data: dict[str, Any]
+    project: dict[str, Any],
+    month_data: dict[str, Any],
+    option_keys: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     leaves: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -9350,6 +9416,8 @@ def _cloudshift_leave_rows(
         date_text = f"{month_data['year']:04d}-{month_data['month']:02d}-{day:02d}"
         for index, entry in enumerate(entries or []):
             option_key, name = parse_entry_value((entry or {}).get("value", ""))
+            if option_keys is not None and option_key not in option_keys:
+                continue
             leave_type = _leave_option_label(option_key)
             if not leave_type:
                 continue
@@ -9378,6 +9446,109 @@ def _cloudshift_leave_rows(
             leaves.append(payload)
 
     return leaves, skipped
+
+
+def _sync_project_month_leaves(
+    project: dict[str, Any],
+    year: int,
+    month: int,
+    *,
+    calendar_id: str,
+    option_keys: set[str],
+    actor_user_id: str,
+) -> dict[str, Any]:
+    """個人シフトの休暇を有休マネージャーへ置換同期する共通処理。"""
+    month_key = _month_key(year, month)
+    month_data = (project.get("months") or {}).get(month_key)
+    if project.get("mode") != "person" or not month_data:
+        return {"success": True, "status": "not_applicable", "month_key": month_key}
+    if not calendar_id:
+        return {"success": True, "status": "not_configured", "month_key": month_key}
+
+    leaves, skipped = _cloudshift_leave_rows(project, month_data, option_keys)
+    ensure_data_directories, _, replace_cloudshift_leaves = _leave_sync_bridge()
+    ensure_data_directories()
+    result = replace_cloudshift_leaves(
+        user_id=actor_user_id,
+        calendar_id=calendar_id,
+        target_year_month=f"{year:04d}{month:02d}",
+        source_project_id=str(project.get("id") or ""),
+        source_month_key=month_key,
+        leaves=leaves,
+    )
+    skipped_items = [
+        {
+            "day": item["day"],
+            "entry_id": item["entry_id"],
+            "name": item["name"],
+            "leave_type": item["leave_type"],
+            "reason": "社員ID未設定のためスキップ",
+        }
+        for item in skipped
+    ]
+    skipped_items.extend(result.get("skipped") or [])
+    return {
+        "success": True,
+        "status": "synced",
+        "calendar_id": calendar_id,
+        "month_key": month_key,
+        "created_total": result["created_total"],
+        "removed_total": result["removed_total"],
+        "removed_by_calendar": result["removed_by_calendar"],
+        "skipped_total": len(skipped_items),
+        "skipped": skipped_items,
+    }
+
+
+def _auto_sync_project_month_leaves(project: dict[str, Any], year: int, month: int) -> dict[str, Any]:
+    settings = _shift_book_settings(project)["leave_sync"]
+    calendar_id = str(settings.get("calendar_id") or "").strip()
+    owner_user_id = str(project.get("owner_user_id") or "").strip()
+    if project.get("mode") != "person":
+        return {"success": True, "status": "not_applicable"}
+    if not calendar_id:
+        try:
+            ensure_data_directories, get_cloudshift_calendar_options, _ = _leave_sync_bridge()
+            ensure_data_directories()
+            calendars = get_cloudshift_calendar_options(owner_user_id)
+            calendar_id = str(calendars[0]["calendar_id"] if calendars else "").strip()
+        except Exception:
+            calendar_id = ""
+        if not calendar_id:
+            return {"success": True, "status": "not_configured"}
+    try:
+        result = _sync_project_month_leaves(
+            project,
+            year,
+            month,
+            calendar_id=calendar_id,
+            option_keys=set(settings.get("option_keys") or []),
+            actor_user_id=owner_user_id,
+        )
+        if result.get("status") == "synced":
+            _append_history(
+                str(project.get("id") or ""),
+                {
+                    "timestamp": _jst_now_iso(),
+                    "editor_name": "自動同期",
+                    "editor_type": "system",
+                    "action": "leave_sync_auto",
+                    "month_key": _month_key(year, month),
+                    "changes": [
+                        f"有休マネージャーへ自動反映: 登録 {result.get('created_total', 0)}件 / 削除 {result.get('removed_total', 0)}件"
+                    ],
+                },
+            )
+        return result
+    except Exception as exc:
+        logger.exception("automatic leave sync failed (project=%s)", project.get("id"))
+        return {
+            "success": False,
+            "status": "failed",
+            "calendar_id": calendar_id,
+            "message": "シフトは保存しましたが、有休マネージャーへの自動同期に失敗しました",
+            "error": str(exc),
+        }
 
 
 def _find_month_entry(
@@ -10862,6 +11033,7 @@ def api_project_account_shares(project_id: str):
                     {"id": office_id, "label": office_labels.get(office_id, str(office_id))}
                     for office_id in sorted(owner_office_ids)
                 ],
+                "office_candidates": _same_office_share_candidates(),
             }
         )
 
@@ -11038,10 +11210,20 @@ def api_project_owner_candidates(project_id: str):
 def api_project_settings(project_id: str):
     if request.method == "GET":
         project = _owner_project_or_404(project_id)
+        leave_calendars: list[dict[str, str]] = []
+        if project.get("mode") == "person":
+            ensure_data_directories, get_cloudshift_calendar_options, _ = _leave_sync_bridge()
+            ensure_data_directories()
+            leave_calendars = get_cloudshift_calendar_options(str(project.get("owner_user_id") or _user_id()))
         return jsonify(
             {
                 "success": True,
                 "settings": _shift_book_settings(project),
+                "leave_calendars": leave_calendars,
+                "leave_options": [
+                    {"key": key, "label": label}
+                    for key, label in LEAVE_OPTION_MAPPINGS.items()
+                ],
                 "leave_change_requests": _normalized_leave_change_requests(project),
                 "pending_leave_change_request_count": _leave_change_request_pending_count(project),
                 "unviewed_leave_change_request_count": _leave_change_request_unviewed_count(project),
@@ -11053,15 +11235,51 @@ def api_project_settings(project_id: str):
     enabled = bool(data.get("leave_change_requests_enabled"))
     with _project_lock(project_id):
         project = _owner_project_or_404(project_id)
-        previous = _shift_book_settings(project)["leave_change_requests"]["enabled"]
+        previous_settings = _shift_book_settings(project)
+        previous = previous_settings["leave_change_requests"]["enabled"]
+        leave_sync = dict(previous_settings["leave_sync"])
+        if project.get("mode") == "person" and (
+            "leave_sync_calendar_id" in data or "leave_sync_option_keys" in data
+        ):
+            calendar_id = str(data.get("leave_sync_calendar_id") or "").strip()
+            raw_option_keys = data.get("leave_sync_option_keys")
+            if not isinstance(raw_option_keys, list):
+                raise CloudShiftError("同期する休暇オプションはリストで指定してください", 400)
+            requested_keys = {str(value or "").strip().upper() for value in raw_option_keys}
+            option_keys = [key for key in LEAVE_OPTION_MAPPINGS if key in requested_keys]
+            if calendar_id:
+                ensure_data_directories, get_cloudshift_calendar_options, _ = _leave_sync_bridge()
+                ensure_data_directories()
+                accessible_ids = {
+                    item["calendar_id"]
+                    for item in get_cloudshift_calendar_options(str(project.get("owner_user_id") or _user_id()))
+                }
+                if calendar_id not in accessible_ids:
+                    raise CloudShiftError("選択した営業所に反映する権限がありません", 403)
+            leave_sync = {
+                "calendar_id": calendar_id,
+                "option_keys": option_keys,
+            }
         project["shift_book_settings"] = {
-            **_shift_book_settings(project),
+            **previous_settings,
             "leave_change_requests": {
                 "enabled": enabled,
             },
+            "leave_sync": leave_sync,
         }
         _save_project(project)
+        setting_changes: list[str] = []
         if previous != enabled:
+            setting_changes.append(
+                "休暇種別変更申請を許可" if enabled else "休暇種別変更申請を停止"
+            )
+        if previous_settings["leave_sync"] != leave_sync:
+            selected_labels = [LEAVE_OPTION_MAPPINGS[key] for key in leave_sync["option_keys"]]
+            setting_changes.append(
+                "有休マネージャー自動同期を更新: "
+                + (" / ".join(selected_labels) if selected_labels else "同期対象なし")
+            )
+        if setting_changes:
             _append_history(
                 project_id,
                 {
@@ -11070,9 +11288,7 @@ def api_project_settings(project_id: str):
                     "editor_type": "owner",
                     "action": "shift_book_settings_updated",
                     "month_key": None,
-                    "changes": [
-                        "休暇種別変更申請を許可" if enabled else "休暇種別変更申請を停止"
-                    ],
+                    "changes": setting_changes,
                 },
             )
     return jsonify(
@@ -11322,8 +11538,8 @@ def _create_month_in_project(project: dict[str, Any], payload: dict[str, Any], a
 def api_create_month(project_id: str):
     payload = request.get_json(silent=True) or {}
     with _project_lock(project_id):
-        project, access_role = _editable_project_or_404(project_id)
-        month_payload = _create_month_in_project(project, payload, _user_label(), access_role)
+        project = _owner_project_or_404(project_id)
+        month_payload = _create_month_in_project(project, payload, _user_label(), "owner")
         month_key = _month_key(month_payload["year"], month_payload["month"])
         # 既存データの取り込みは対象帳（project 自身）への書き込みのため、ロック内で
         # 実施してロック外保存によるロストアップデートを防ぐ。この取り込みは他帳の
@@ -11489,6 +11705,78 @@ def _save_large_month_in_project(
     return merged
 
 
+def _assert_no_scene_month_conflicts(
+    project: dict[str, Any],
+    year: int,
+    month: int,
+    entries_per_day: dict[str, Any],
+) -> None:
+    """現場シフトを保存する際、同じ管理者の別現場との同日重複を拒否する。"""
+    if project.get("mode") != "scene":
+        return
+    month_key = _month_key(year, month)
+    owner_user_id = str(project.get("owner_user_id") or "").strip()
+    project_id = str(project.get("id") or "").strip()
+    conflicts: list[dict[str, str]] = []
+    for other_project in _iter_project_summaries_for_month(month_key, mode="scene"):
+        if not other_project or str(other_project.get("id") or "").strip() == project_id:
+            continue
+        if owner_user_id and str(other_project.get("owner_user_id") or "").strip() != owner_user_id:
+            continue
+        other_month = (other_project.get("months") or {}).get(month_key)
+        if not isinstance(other_month, dict):
+            continue
+        other_title = str(other_project.get("title") or "").strip() or "名称未設定"
+        for day_key, local_entries in (entries_per_day or {}).items():
+            other_entries = (other_month.get("entries_per_day") or {}).get(str(day_key), [])
+            if not isinstance(local_entries, list) or not isinstance(other_entries, list):
+                continue
+            for local_entry in local_entries:
+                if not isinstance(local_entry, dict) or str(local_entry.get("sync_source_type") or "").strip():
+                    continue
+                local_option, local_name = parse_entry_value(local_entry.get("value") or "")
+                local_number = str(local_entry.get("employee_number") or "").strip()
+                for other_entry in other_entries:
+                    if not isinstance(other_entry, dict) or str(other_entry.get("sync_source_type") or "").strip():
+                        continue
+                    other_option, other_name = parse_entry_value(other_entry.get("value") or "")
+                    if not _assist_candidate_matches_scene_entry(
+                        candidate_name=str(local_name or "").strip(),
+                        candidate_employee_number=local_number,
+                        entry_name=str(other_name or "").strip(),
+                        entry_employee_number=str(other_entry.get("employee_number") or "").strip(),
+                    ):
+                        continue
+                    if not is_duplicate_by_rules(
+                        str(local_option or "").strip() or None,
+                        str(other_option or "").strip() or None,
+                    ):
+                        continue
+                    conflicts.append(
+                        {
+                            "day": str(day_key),
+                            "name": str(local_name or "").strip() or local_number,
+                            "project_title": other_title,
+                            "shift_label": _assist_shift_label(other_option),
+                        }
+                    )
+    if not conflicts:
+        return
+    unique: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for item in conflicts:
+        key = (item["day"], item["name"], item["project_title"], item["shift_label"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    details = " / ".join(
+        f"{item['day']}日 {item['name']}（{item['project_title']}・{item['shift_label']}）"
+        for item in unique[:5]
+    )
+    suffix = f" ほか{len(unique) - 5}件" if len(unique) > 5 else ""
+    raise CloudShiftError(f"同日の別現場シフトと重複しています: {details}{suffix}", 409)
+
+
 def _save_month_in_project(
     project: dict[str, Any],
     year: int,
@@ -11529,6 +11817,7 @@ def _save_month_in_project(
         "entries_per_day": prepared_entries,
     }
     merged = _merge_month_payload(current_month, incoming_month, base_month)
+    _assert_no_scene_month_conflicts(project, year, month, merged.get("entries_per_day") or {})
     merged["draft_entries_per_day"] = _normalize_entries(merged.get("entries_per_day"), year, month)
     changes = _describe_month_changes(current_month, merged)
     decision_changes = _finalize_approved_leave_change_requests(
@@ -11937,8 +12226,9 @@ def api_save_month(project_id: str, year: int, month: int):
         lambda: _resync_shift_month(project, month_key, actor_name=_user_label()),
         operation="save_month_push", project_id=project_id, month_key=month_key,
     )
+    leave_sync = _auto_sync_project_month_leaves(project, year, month)
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
-    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True), "leave_sync": leave_sync})
 
 
 def _large_worktime_payload(project: dict[str, Any], year: int, month: int) -> dict[str, Any]:
@@ -14112,23 +14402,8 @@ def api_export_public_pwa(token: str, export_format: str):
 
 @cloudshift_bp.route("/api/public/edit/<token>/month", methods=["POST"])
 def api_public_create_month(token: str):
-    payload = request.get_json(silent=True) or {}
-    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
-    project = _find_project_by_token(token, "edit")
-    with _project_lock(project["id"]):
-        project = _find_project_by_token(token, "edit")
-        month_payload = _create_month_in_project(project, payload, actor_name, actor_type)
-    month_key = _month_key(month_payload["year"], month_payload["month"])
-    _best_effort_shift_sync(
-        lambda: _resync_shift_month(project, month_key, actor_name=actor_name),
-        operation="public_add_month_push", project_id=project.get("id"), month_key=month_key,
-    )
-    _best_effort_shift_sync(
-        lambda: _refresh_shift_sync_for_target_month(project, month_key, actor_name=actor_name),
-        operation="public_add_month_pull", project_id=project.get("id"), month_key=month_key,
-    )
-    project = _find_project_by_token(token, "edit")
-    return jsonify({"success": True, "project": _project_detail_payload(project, month_key)})
+    _find_project_by_token(token, "edit")
+    raise CloudShiftError("共有されたシフト帳では新しい月を追加できません", 403)
 
 
 @cloudshift_bp.route("/api/public/edit/<token>/month/<int:year>/<int:month>", methods=["PUT"])
@@ -14149,8 +14424,9 @@ def api_public_save_month(token: str, year: int, month: int):
         lambda: _resync_shift_month(project, month_key, actor_name=actor_name),
         operation="public_save_month_push", project_id=project.get("id"), month_key=month_key,
     )
+    leave_sync = _auto_sync_project_month_leaves(project, year, month)
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
-    return jsonify({"success": True, "month": _client_month_payload(month_payload, project=project), "project": _project_detail_payload(project, month_key)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, project=project), "project": _project_detail_payload(project, month_key), "leave_sync": leave_sync})
 
 
 @cloudshift_bp.route("/api/public/edit/<token>/assist")
