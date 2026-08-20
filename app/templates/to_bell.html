@@ -10,7 +10,7 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='to_bell/to_bell.css') }}">
 
-<div class="tobell-shell">
+<div class="tobell-shell" data-tb-user="{{ current_user_id }}">
   <header class="tobell-header">
     <div class="tobell-header-lead">
       <p class="tobell-kicker">Universal Task Management App</p>
@@ -52,6 +52,7 @@
         <button class="tobell-filter" data-filter="attention">要対応</button>
         <button class="tobell-filter" data-filter="overdue">期限切れ</button>
         <button class="tobell-filter" data-filter="done">完了</button>
+        <button class="tobell-filter" data-filter="archived">アーカイブ</button>
         <button class="tobell-filter tobell-filter-integration" data-filter="integrations" title="CloudShift・健診PLUS・Googleカレンダーから自動追加されたタスク">🔗 連携</button>
       </nav>
       <div class="tobell-search">
@@ -122,12 +123,24 @@
           {% endfor %}
         </select>
       </label>
+      <label>確認者
+        <select name="reviewer_id">
+          <option value="">なし</option>
+          {% for user in users %}
+          <option value="{{ user.username }}">{{ user.name or user.username }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <label>プロジェクト
         <select name="project_id" data-project-select>
           <option value="">なし</option>
         </select>
       </label>
     </div>
+    <label class="tobell-check-line">
+      <input type="checkbox" name="due_all_day" data-due-all-day>
+      <span>🗓 終日（時刻を指定しない／通知を出さない）</span>
+    </label>
     <label>タグ<input name="tags" placeholder="カンマ区切り"></label>
     <label class="tobell-check-line">
       <input type="checkbox" name="pinned">
@@ -156,9 +169,13 @@
       <button type="button" class="tobell-btn" data-action="complete">完了</button>
       <button type="button" class="tobell-btn" data-action="reopen">戻す</button>
       <button type="button" class="tobell-btn" data-action="template">テンプレ化</button>
+      {% if not share_session %}
       <button type="button" class="tobell-btn" data-action="links">紐付け</button>
+      {% endif %}
       <button type="button" class="tobell-btn tobell-danger" data-action="archive">アーカイブ</button>
+      {% if not share_session %}
       <button type="button" class="tobell-btn tobell-danger" data-action="delete">削除</button>
+      {% endif %}
     </div>
   </form>
   <section class="tobell-section">
@@ -274,6 +291,7 @@
         </label>
       </div>
       <label>タグ<input name="tags" placeholder="カンマ区切り"></label>
+      <p class="tobell-share-note tobell-newtask-hint" data-newtask-project-hint hidden></p>
       <label class="tobell-check-line">
         <input type="checkbox" name="pinned">
         <span>📌 先頭に常に表示する（ピン留め）</span>
@@ -405,6 +423,10 @@
     <div id="tb-template-list" class="tobell-template-list"></div>
     <form id="tb-template-form" class="tobell-inline-form tobell-template-create">
       <input name="name" placeholder="空のテンプレートを作成">
+      <select name="scope" aria-label="公開範囲">
+        <option value="private">自分のみ</option>
+        <option value="office">所属内で共有</option>
+      </select>
       <button type="submit" class="tobell-btn">作成</button>
     </form>
   </div>

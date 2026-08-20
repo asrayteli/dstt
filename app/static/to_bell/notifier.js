@@ -59,8 +59,25 @@
     }
   }
 
+  // 通知済みフラグ（toBellNotified:*）の掃除。サーバー側の期限監視窓（60日）より
+  // 短い期間で消すと、同じ予定に対して繰り返し通知が出てしまうため長めに取る。
+  const NOTIFIED_KEY_TTL_MS = 65 * 24 * 60 * 60 * 1000;
+
+  function pruneNotifiedKeys() {
+    const cutoff = Date.now() - NOTIFIED_KEY_TTL_MS;
+    const stale = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith("toBellNotified:")) continue;
+      const stored = Date.parse(localStorage.getItem(key) || "");
+      if (Number.isNaN(stored) || stored < cutoff) stale.push(key);
+    }
+    stale.forEach((key) => localStorage.removeItem(key));
+  }
+
   async function checkDueTasks() {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
+    pruneNotifiedKeys();
     let data;
     try {
       const response = await fetch("/tools/to_bell/api/notifications/due-tasks");

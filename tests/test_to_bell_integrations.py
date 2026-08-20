@@ -32,11 +32,21 @@ def app_ctx(tmp_path, monkeypatch):
     yield app
 
 
-def _create_user(app_ctx, username: str):
-    from app.models import User, db
+def _create_user(app_ctx, username: str, *, tools: tuple[str, ...] = ()):
+    """テストユーザーを作る。
+
+    ``tools`` には sensitive ツール（pluslist / siteplus / shiftersync / health_check）の
+    アクセス権を渡す。ToBell の連携トグルは「そのツールを使える人」しか有効化できない
+    ため、連携を使うテストでは対応するツール権限が必要になる。
+    """
+    from app.models import User, UserToolPermission, db
 
     with app_ctx.app_context():
-        db.session.add(User(username=username, password_hash="hash", name=username.title()))
+        user = User(username=username, password_hash="hash", name=username.title())
+        db.session.add(user)
+        db.session.flush()
+        for tool_key in tools:
+            db.session.add(UserToolPermission(user_id=user.id, tool_key=tool_key))
         db.session.commit()
 
 
@@ -67,8 +77,8 @@ def test_integrations_default_all_off(app_ctx):
 
 
 def test_toggle_persists_per_user(app_ctx):
-    _create_user(app_ctx, "alice")
-    _create_user(app_ctx, "bob")
+    _create_user(app_ctx, "alice", tools=("pluslist", "shiftersync"))
+    _create_user(app_ctx, "bob", tools=("pluslist", "shiftersync"))
 
     alice = app_ctx.test_client()
     _login(alice, "alice")
@@ -104,7 +114,7 @@ def test_link_apis_require_per_feature_permission(app_ctx):
 def test_employee_link_lifecycle(app_ctx):
     from app.models import Employee, db
 
-    _create_user(app_ctx, "alice")
+    _create_user(app_ctx, "alice", tools=("pluslist",))
     client = app_ctx.test_client()
     _login(client, "alice")
     client.put(
@@ -148,8 +158,8 @@ def test_employee_link_delete_rejects_unrelated_user(app_ctx):
     """他人のタスクに紐づく紐付けを link_id 指定で削除できない（IDOR 対策）。"""
     from app.models import Employee, db
 
-    _create_user(app_ctx, "alice")
-    _create_user(app_ctx, "mallory")
+    _create_user(app_ctx, "alice", tools=("pluslist",))
+    _create_user(app_ctx, "mallory", tools=("pluslist",))
 
     alice = app_ctx.test_client()
     _login(alice, "alice")
@@ -190,7 +200,7 @@ def test_employee_link_delete_rejects_unrelated_user(app_ctx):
 
 def test_link_apis_reject_non_numeric_target_id(app_ctx):
     """非数値の target_id でも 500 にならず 400 を返す。"""
-    _create_user(app_ctx, "alice")
+    _create_user(app_ctx, "alice", tools=("pluslist",))
     client = app_ctx.test_client()
     _login(client, "alice")
     client.put(
@@ -206,8 +216,8 @@ def test_cloudshift_leave_change_request_hook_only_notifies_opted_in(app_ctx):
     from app.services.to_bell_hooks import on_cloudshift_leave_change_request
     from app.services.to_bell_integrations import update_integrations
 
-    _create_user(app_ctx, "alice")
-    _create_user(app_ctx, "bob")
+    _create_user(app_ctx, "alice", tools=("shiftersync",))
+    _create_user(app_ctx, "bob", tools=("shiftersync",))
 
     with app_ctx.app_context():
         update_integrations("alice", {"integrations": {"cloudshift.leave_change_request": True}})
@@ -255,9 +265,9 @@ def test_cloudshift_substitute_update_hook_broadcasts_to_enabled_users(app_ctx):
     from app.services.to_bell_hooks import on_cloudshift_substitute_updated
     from app.services.to_bell_integrations import update_integrations
 
-    _create_user(app_ctx, "alice")
-    _create_user(app_ctx, "bob")
-    _create_user(app_ctx, "carol")
+    _create_user(app_ctx, "alice", tools=("shiftersync",))
+    _create_user(app_ctx, "bob", tools=("shiftersync",))
+    _create_user(app_ctx, "carol", tools=("shiftersync",))
 
     with app_ctx.app_context():
         update_integrations("alice", {"integrations": {"cloudshift.shift_update": True}})
@@ -289,7 +299,7 @@ def test_save_project_fires_substitute_hook_for_all_update_paths(app_ctx):
         _substitute_project_id, _jst_now_iso,
     )
 
-    _create_user(app_ctx, "alice")
+    _create_user(app_ctx, "alice", tools=("shiftersync",))
     with app_ctx.app_context():
         update_integrations("alice", {"integrations": {"cloudshift.shift_update": True}})
         pid = _substitute_project_id(1)
@@ -337,7 +347,7 @@ def test_save_project_during_get_does_not_fire_substitute_hook(app_ctx):
         _substitute_project_id, _jst_now_iso,
     )
 
-    _create_user(app_ctx, "alice")
+    _create_user(app_ctx, "alice", tools=("shiftersync",))
     with app_ctx.app_context():
         update_integrations("alice", {"integrations": {"cloudshift.shift_update": True}})
         pid = _substitute_project_id(2)

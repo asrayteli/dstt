@@ -67,8 +67,8 @@ from app.services.to_bell_service import (
 )
 from app.services.to_bell_integrations import (
     FILEPOST_OVERFLOW_THRESHOLD,
-    INTEGRATION_KEYS,
     get_settings as get_integration_settings,
+    has_tool_access as integration_tool_access,
     is_enabled as integration_is_enabled,
     update_integrations,
 )
@@ -112,6 +112,53 @@ SHARE_COOKIE_PATH = "/tools/to_bell"
 SHARE_COOKIE_MAX_AGE = 60 * 60 * 24 * 180  # 180日
 
 
+# 共有トークン（ログイン不要リンク）で入ったセッションに許さない操作。
+#
+# 共有リンクは「本人としてToBellだけを操作できる」という約束で配る。したがって、
+#   * ToBell の外（社員名簿・現場リスト・FILEPOST・Googleカレンダー）へ手が届く操作
+#   * 取り返しがつかない操作（完全削除・一括削除）
+#   * 他人へ影響する操作（所属全員への通知）
+#   * 本人の設定・接続情報を書き換える操作
+# はブロックする。UI 側でボタンを隠すだけでは、URL を直接叩けば通ってしまう。
+_SHARE_BLOCKED_ENDPOINTS = frozenset({
+    # 共有リンク自体の管理
+    "to_bell.api_share_status",
+    "to_bell.api_share_issue",
+    "to_bell.api_share_revoke",
+    # 取り返しのつかない削除
+    "to_bell.api_bulk_delete_tasks",
+    # 他人へ影響する
+    "to_bell.api_project_notify",
+    # 通知先（端末）の管理
+    "to_bell.api_push_subscribe",
+    "to_bell.api_push_unsubscribe",
+    "to_bell.api_push_subscriptions",
+    "to_bell.api_push_subscription",
+    "to_bell.api_push_test",
+    # 設定・外部接続
+    "to_bell.api_settings_integrations",
+    "to_bell.api_google_connect",
+    "to_bell.api_google_callback",
+    "to_bell.api_google_disconnect",
+    "to_bell.api_google_reminders",
+    "to_bell.api_google_import_settings",
+    "to_bell.api_google_import_now",
+    "to_bell.api_task_calendar_enable",
+    "to_bell.api_task_calendar_disable",
+    # pluslist / siteplus / FILEPOST への到達
+    "to_bell.api_employee_links",
+    "to_bell.api_employee_link_delete",
+    "to_bell.api_employee_search",
+    "to_bell.api_site_links",
+    "to_bell.api_site_link_delete",
+    "to_bell.api_site_search",
+    "to_bell.api_filepost_threshold",
+    "to_bell.api_filepost_upload",
+    "to_bell.api_filepost_files_list",
+    "to_bell.api_filepost_files_delete",
+})
+
+
 def _is_share_session() -> bool:
     return bool(getattr(g, "tobell_via_share_token", False))
 
@@ -120,6 +167,31 @@ def _block_share_session() -> None:
     """共有トークンで入ったセッションには共有リンクの管理を許さない。"""
     if _is_share_session():
         abort(403)
+
+
+@to_bell_bp.before_request
+def _guard_share_session():
+    """共有セッションからの越境操作をまとめて弾く。
+
+    個々のビューに ``_block_share_session()`` を書き足す方式だと、エンドポイントを
+    追加したときに書き忘れが起きる。ここで一括して落とす。
+    """
+    # current_user は遅延解決される。共有トークンを読む request_loader は
+    # current_user に触れて初めて動くため、ここで一度参照して g のフラグを確定させる。
+    # （これを忘れると before_request の時点ではフラグが未設定で、ガードが素通りする）
+    current_user.is_authenticated  # noqa: B018 - 遅延ロードの発火が目的
+    if not _is_share_session():
+        return None
+    if request.endpoint in _SHARE_BLOCKED_ENDPOINTS:
+        abort(403, description="共有リンクではこの操作を利用できません。")
+    # 完全削除（?hard=1）は共有リンクからは許可しない（アーカイブは可）。
+    if request.endpoint == "to_bell.api_delete_task" and _wants_hard_delete():
+        abort(403, description="共有リンクからタスクを完全削除することはできません。")
+    return None
+
+
+def _wants_hard_delete() -> bool:
+    return request.args.get("hard", "").lower() in ("1", "true", "yes")
 
 
 @to_bell_bp.route("/")
@@ -292,7 +364,7 @@ def api_update_task(task_id: int):
 @to_bell_bp.route("/api/tasks/<int:task_id>", methods=["DELETE"])
 @login_required
 def api_delete_task(task_id: int):
-    hard = request.args.get("hard", "").lower() in ("1", "true", "yes")
+    hard = _wants_hard_delete()
 
     def action():
         task = get_task_for_user(task_id, current_user.username)
@@ -650,7 +722,7 @@ def api_settings_get():
 @to_bell_bp.route("/api/settings/integrations", methods=["PUT"])
 @login_required
 def api_settings_integrations():
-    _block_share_session()
+    # アクセス権のない連携キーは update_integrations 側で無視される。
     return jsonify(update_integrations(current_user.username, _payload()))
 
 
@@ -800,6 +872,15 @@ def _calendar_endpoint(action):
 
 
 def _require_link_permission(integration_key: str) -> None:
+    """連携機能を使える条件。
+
+    ``integration_is_enabled`` は「個人トグルON」かつ「連携先ツールのアクセス権あり」
+    を判定する（app/services/to_bell_integrations.py）。トグルは利用者が自分で押せる
+    ため、トグルだけを条件にすると pluslist / siteplus（sensitive＝個別付与が必要）の
+    名簿を権限のない利用者が ToBell 経由で全件検索できてしまう。
+    """
+    if not integration_tool_access(current_user.username, integration_key):
+        abort(403, description="この連携先ツールへのアクセス権がありません。管理者に付与を依頼してください。")
     if not integration_is_enabled(current_user.username, integration_key):
         abort(403, description="連携が無効です。ToBellの設定で有効化してください。")
 

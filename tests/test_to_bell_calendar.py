@@ -101,10 +101,17 @@ class FakeCalendar:
 
 
 def _make_task(app_ctx, username: str, *, due_at):
-    from app.services.to_bell_service import create_task
+    """テスト用タスクを作る。
+
+    期日を指定せず追加したタスクは「追加した日の終日」になる仕様なので、
+    期日なしタスクを作りたい場合は、作成後に明示的に期日を消す。
+    """
+    from app.services.to_bell_service import create_task, update_task
 
     with app_ctx.app_context():
         task = create_task(username, {"title": "請求確認", "due_at": due_at})
+        if not due_at:
+            update_task(task, {"due_at": ""}, username)
         return task.id
 
 

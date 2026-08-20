@@ -57,8 +57,10 @@ INTERVAL_MINUTES = {
 DEFAULT_INTERVAL = "15m"
 
 # 初回（syncToken なし）の取り込み窓。
+# 未来側が狭いと、その先の予定は「変更が入るまで」永久に取り込まれない
+# （syncToken の差分同期は未変更の予定を返さないため）。1年先まで取る。
 _INITIAL_PAST_DAYS = 7
-_INITIAL_FUTURE_DAYS = 90
+_INITIAL_FUTURE_DAYS = 365
 # 1回の取り込みで辿るページ数の安全弁（250件/ページ）。
 _MAX_PAGES = 200
 
@@ -113,8 +115,24 @@ def set_import_mode(username: str, mode: Any) -> str:
     value = str(mode or "").strip()
     if value not in VALID_MODES:
         raise ToBellCalendarError("取り込み範囲の指定が不正です。")
+    previous = get_import_mode(username)
     _save_pref(username, "gcal_import_mode", value)
+    if value != previous:
+        # 取り込む範囲を変えたら次回はフル取得に戻す。syncToken による差分同期は
+        # 「変更のあった予定」しか返さないため、トークンを据え置くと範囲を広げても
+        # 既存の予定が永久に取り込まれない（設定が効いていないように見える）。
+        reset_sync_token(username)
     return value
+
+
+def reset_sync_token(username: str) -> bool:
+    """次回の取り込みをフル取得に戻す。"""
+    account = to_bell_calendar.get_account(username)
+    if account is None or account.calendar_sync_token is None:
+        return False
+    account.calendar_sync_token = None
+    db.session.commit()
+    return True
 
 
 def set_import_interval(username: str, interval: Any) -> str:
@@ -278,11 +296,14 @@ def _matches_mode(event: dict[str, Any], mode: str, summary_text: str) -> bool:
 
 
 def _title_for(event: dict[str, Any], mode: str, summary_text: str) -> str:
-    title = summary_text
-    if mode == MODE_TB_SUFFIX:
-        stripped = _TB_STRIP_RE.sub("", summary_text).strip()
-        title = stripped or summary_text
-    title = title.strip()
+    """タスク名に使う文字列。末尾の「TB」マーカーは常に取り除く。
+
+    TB は「この予定を ToBell に取り込む」ための目印であって予定名の一部ではない。
+    モードによって付けたり外したりすると、取り込む範囲を変えた瞬間に既存タスクの
+    名前が「請求」→「請求 TB」と書き換わってしまう。
+    """
+    stripped = _TB_STRIP_RE.sub("", summary_text).strip()
+    title = (stripped or summary_text).strip()
     return (title or "(無題の予定)")[:240]
 
 

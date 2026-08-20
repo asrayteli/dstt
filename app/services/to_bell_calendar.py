@@ -252,7 +252,18 @@ def _event_body(task: ToBellTask, username: str) -> dict[str, Any]:
 
 # ----- Calendar API 呼び出し -----
 
-def _calendar_request(method: str, path: str, account: ToBellGoogleAccount, *, json: Any = None) -> dict[str, Any]:
+class ToBellCalendarEventMissing(ToBellCalendarError):
+    """対象イベントが Google 側に存在しない（404/410）。"""
+
+
+def _calendar_request(
+    method: str,
+    path: str,
+    account: ToBellGoogleAccount,
+    *,
+    json: Any = None,
+    allow_missing: bool = False,
+) -> dict[str, Any]:
     token = valid_access_token(account)
     url = f"{CALENDAR_API_BASE}{path}"
 
@@ -274,9 +285,14 @@ def _calendar_request(method: str, path: str, account: ToBellGoogleAccount, *, j
 
     if resp.status_code in (200, 201):
         return resp.json()
-    if resp.status_code in (204, 404, 410):
-        # 204=成功(本文なし)、404/410=既に存在しない（削除は冪等扱い）
-        return {}
+    if resp.status_code == 204:
+        return {}  # 成功（本文なし）
+    if resp.status_code in (404, 410):
+        # 既に存在しないイベント。削除なら冪等に成功扱いでよいが、更新（PATCH）を
+        # 成功扱いにすると「送ったつもりで実際は何も無い」状態が黙って続いてしまう。
+        if allow_missing:
+            return {}
+        raise ToBellCalendarEventMissing("対象のカレンダー予定が見つかりません。")
     detail = ""
     try:
         detail = resp.json().get("error", {}).get("message", "")
@@ -314,6 +330,7 @@ def _delete_event(task: ToBellTask, account: ToBellGoogleAccount) -> None:
         "DELETE",
         f"/calendars/{PRIMARY_CALENDAR}/events/{task.gcal_event_id}",
         account,
+        allow_missing=True,
     )
 
 
@@ -339,7 +356,14 @@ def enable_for_task(task: ToBellTask, username: str, reminder_override: Any = No
         task.gcal_reminder_override = normalize_reminders(reminder_override)
 
     if task.gcal_event_id and task.gcal_synced_by == username:
-        _patch_event(task, account)
+        try:
+            _patch_event(task, account)
+        except ToBellCalendarEventMissing:
+            # カレンダー側で予定が消えていた（手動削除・アーカイブ時の削除など）。
+            # 参照だけ残っている状態なので、作り直して整合させる。
+            task.gcal_event_id = None
+            task.gcal_synced_by = None
+            _create_event(task, username, account)
     else:
         _create_event(task, username, account)
     db.session.commit()
@@ -356,9 +380,7 @@ def disable_for_task(task: ToBellTask, username: str) -> dict[str, Any]:
             _delete_event(task, account)
         except ToBellCalendarError:
             logger.warning("カレンダーイベント削除に失敗（参照は外します）", exc_info=True)
-    task.gcal_event_id = None
-    task.gcal_synced_by = None
-    task.gcal_reminder_override = None
+    _clear_calendar_link(task)
     db.session.commit()
     return {"gcal_synced": False}
 
@@ -373,7 +395,12 @@ def on_task_changed(task: ToBellTask) -> None:
         account = get_account(task.gcal_synced_by)
         if account is None or not account.refresh_token:
             return
-        _patch_event(task, account)
+        try:
+            _patch_event(task, account)
+        except ToBellCalendarEventMissing:
+            # カレンダー側に予定が無い。参照を外して「未同期」に戻し、画面上の
+            # 「カレンダーに送る」表示と実態を一致させる。
+            _clear_calendar_link(task)
         db.session.commit()
     except Exception:  # noqa: BLE001
         logger.warning("ToBell→Calendar の自動同期に失敗しました", exc_info=True)
@@ -381,13 +408,25 @@ def on_task_changed(task: ToBellTask) -> None:
 
 
 def on_task_deleted(task: ToBellTask) -> None:
-    """タスク削除時にイベントも削除する。"""
+    """タスク削除（アーカイブ含む）時にイベントも削除する。
+
+    アーカイブは「元に戻せる」操作なので、カレンダー側の予定を消したら ToBell 側の
+    参照も必ず外す。外さないと、戻したときに「カレンダーに送る」がONのまま実体が
+    無い状態になり、以後の更新も静かに何も起きなくなる。
+    """
     if not task.gcal_event_id or not task.gcal_synced_by:
         return
     try:
         account = get_account(task.gcal_synced_by)
-        if account is None or not account.refresh_token:
-            return
-        _delete_event(task, account)
+        if account is not None and account.refresh_token:
+            _delete_event(task, account)
     except Exception:  # noqa: BLE001
         logger.warning("ToBell→Calendar の削除同期に失敗しました", exc_info=True)
+    finally:
+        _clear_calendar_link(task)
+
+
+def _clear_calendar_link(task: ToBellTask) -> None:
+    task.gcal_event_id = None
+    task.gcal_synced_by = None
+    task.gcal_reminder_override = None

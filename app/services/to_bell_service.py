@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import and_, func, or_
+from sqlalchemy.orm import selectinload
 from werkzeug.utils import secure_filename
 
 from app.models import (
@@ -53,6 +54,13 @@ def _manual_task_clause():
 
 ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 
+# 共有トークンの last_used_at を書き戻す最小間隔。
+SHARE_TOKEN_TOUCH_INTERVAL = timedelta(hours=1)
+
+# 「終日タスク」の目印。時刻を指定していないタスクは、その日の 23:59:59 として保存する。
+# has_explicit_notification_time() がこの値を「時刻未指定」と判定し、プッシュを送らない。
+END_OF_DAY = time.max.replace(microsecond=0)  # 23:59:59
+
 # 入力テキストの最大保存長（DB カラム長に合わせた切り詰め用）
 MAX_TITLE_LEN = 240
 MAX_COMMENT_PREVIEW_LEN = 300
@@ -70,6 +78,36 @@ def local_today() -> date:
     return local_now().date()
 
 
+def end_of_day(day: date) -> datetime:
+    """指定日の「終日タスク」用日時（23:59:59）。"""
+    return datetime.combine(day, END_OF_DAY)
+
+
+def default_due_at() -> datetime:
+    """期日を指定せずに追加したタスクの既定期日＝追加した日の終日。
+
+    カレンダー／期限ビューに必ず並ぶようにするための既定値。時刻は付けないので
+    プッシュ通知は飛ばない（has_explicit_notification_time() を参照）。
+    """
+    return end_of_day(local_today())
+
+
+def _escape_like(value: str) -> str:
+    """LIKE のメタ文字をエスケープする（`%` や `_` を「そのままの文字」として扱う）。
+
+    エスケープしないと、一括削除で `%` を入力しただけで全件一致してしまう。
+    """
+    return (
+        value.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
+def _like_pattern(value: str) -> str:
+    return f"%{_escape_like(value)}%"
+
+
 def parse_datetime(value: Any, field: str) -> datetime | None:
     if value in (None, ""):
         return None
@@ -80,7 +118,7 @@ def parse_datetime(value: Any, field: str) -> datetime | None:
         try:
             parsed = datetime.strptime(raw, fmt)
             if fmt == "%Y-%m-%d":
-                return datetime.combine(parsed.date(), time.max.replace(microsecond=0))
+                return end_of_day(parsed.date())
             return parsed
         except ValueError:
             continue
@@ -88,6 +126,21 @@ def parse_datetime(value: Any, field: str) -> datetime | None:
 
 
 def resolve_due_at(payload: dict[str, Any]) -> datetime | None:
+    """入力から期日を組み立てる。
+
+    ``due_all_day`` が真なら、時刻部分を捨てて「その日の終日（23:59:59）」に丸める。
+    詳細パネルの ``datetime-local`` は秒を持てないため、終日タスクを開いて
+    そのまま保存すると 23:59:59 → 23:59:00 になり「時刻指定あり」に化けてしまう。
+    終日フラグを一緒に送ることで、無変更保存でも終日のままにする。
+    """
+    all_day = _truthy(payload.get("due_all_day"))
+    resolved = _resolve_due_at_raw(payload)
+    if all_day and resolved is not None:
+        return end_of_day(resolved.date())
+    return resolved
+
+
+def _resolve_due_at_raw(payload: dict[str, Any]) -> datetime | None:
     if payload.get("due_at"):
         return parse_datetime(payload.get("due_at"), "due_at")
     due_date = str(payload.get("due_date") or "").strip()
@@ -99,6 +152,15 @@ def resolve_due_at(payload: dict[str, Any]) -> datetime | None:
     if due_time:
         return parse_datetime(f"{due_date}T{due_time}", "due_time")
     return parse_datetime(due_date, "due_date")
+
+
+def resolve_due_at_for_new_task(payload: dict[str, Any]) -> datetime:
+    """新規タスクの期日。未指定なら「追加した日の終日」にする。
+
+    期日なしタスクはカレンダー／期限ビューに一切現れないため、既定で当日に置く。
+    あとから詳細パネルで期日を消せば、従来どおり受信箱（期日なし）へ移せる。
+    """
+    return resolve_due_at(payload) or default_due_at()
 
 
 def visible_task_filter(username: str):
@@ -133,43 +195,62 @@ def list_tasks(
     view: str = "list",
 ) -> list[ToBellTask]:
     today = local_today()
-    base_query = ToBellTask.query.filter(visible_task_filter(username))
+    now = local_now()
+    base_query = ToBellTask.query.options(
+        selectinload(ToBellTask.subtasks),
+        selectinload(ToBellTask.comments),
+        selectinload(ToBellTask.attachments),
+        selectinload(ToBellTask.tags),
+    ).filter(visible_task_filter(username))
     pid = _safe_int(project_id)
     is_integration_filter = filter_name == "integrations"
     if is_integration_filter:
         # 専用フィルタ: 連携（自動生成）タスクのみを表示する。
         base_query = base_query.filter(_integration_task_clause())
+    elif view == "calendar":
+        # カレンダーは「その日に何があるか」を見る画面なので、Googleカレンダー取り込みや
+        # CloudShift/健診PLUS 由来の予定も一緒に並べる（リスト・カンバンでは従来どおり除外）。
+        pass
     else:
         # 通常フィルタ/ビューでは連携タスクを除外する（専用フィルタにのみ出す）。
         base_query = base_query.filter(_manual_task_clause())
-        if view != "calendar" and not pid:
-            hidden_subq = db.session.query(ToBellProject.id).filter(ToBellProject.calendar_only.is_(True))
-            base_query = base_query.filter(or_(ToBellTask.project_id.is_(None), ToBellTask.project_id.notin_(hidden_subq)))
+    if view != "calendar" and not pid and not is_integration_filter:
+        base_query = base_query.filter(_visible_project_clause())
     if search:
-        like = f"%{search.strip()}%"
-        base_query = base_query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
+        like = _like_pattern(search.strip())
+        base_query = base_query.filter(
+            or_(ToBellTask.title.ilike(like, escape="\\"), ToBellTask.description.ilike(like, escape="\\"))
+        )
     if pid:
         base_query = base_query.filter(ToBellTask.project_id == pid)
 
     # ピン留めはフィルタ条件に関わらず常に先頭に出す（アーカイブ済みは除く）。
-    pinned_tasks = base_query.filter(
-        ToBellTask.pinned.is_(True),
-        ToBellTask.status != "archived",
-    ).order_by(ToBellTask.updated_at.desc()).all()
-
-    query = base_query.filter(ToBellTask.pinned.is_(False))
+    # ただし「アーカイブ」フィルタ自体はアーカイブ済みだけを見る画面なので混ぜない。
+    if filter_name == "archived":
+        pinned_tasks: list[ToBellTask] = []
+        query = base_query
+    else:
+        pinned_tasks = base_query.filter(
+            ToBellTask.pinned.is_(True),
+            ToBellTask.status != "archived",
+        ).order_by(ToBellTask.updated_at.desc()).all()
+        query = base_query.filter(ToBellTask.pinned.is_(False))
     if filter_name == "integrations":
         # 連携タスク専用フィルタ: アーカイブ以外の自動生成タスクを期限順にすべて返す。
         query = query.filter(ToBellTask.status != "archived")
     elif filter_name == "board":
         # カンバン / カレンダー用: アーカイブ以外の参加タスクをすべて返す。
         query = query.filter(ToBellTask.status != "archived")
+    elif filter_name == "archived":
+        # アーカイブしたタスクの置き場（「戻す」で復帰できるようにするため）。
+        query = query.filter(ToBellTask.status == "archived")
     elif filter_name == "inbox":
         query = query.filter(ToBellTask.due_at.is_(None), ToBellTask.status.in_(["todo", "doing", "blocked", "review", "returned"]))
     elif filter_name == "assigned":
         query = query.filter(ToBellTask.assigned_to == username, ToBellTask.status.notin_(["done", "archived"]))
     elif filter_name == "overdue":
-        query = query.filter(ToBellTask.due_at < datetime.combine(today, time.min), ToBellTask.status.notin_(["done", "archived"]))
+        # 「期限切れ」は現在時刻を過ぎたもの。終日タスク(23:59:59)は当日中は期限切れにしない。
+        query = query.filter(ToBellTask.due_at < now, ToBellTask.status.notin_(["done", "archived"]))
     elif filter_name == "done":
         query = query.filter(ToBellTask.status == "done")
     elif filter_name == "attention":
@@ -178,14 +259,14 @@ def list_tasks(
             or_(
                 ToBellTask.assigned_to == username,
                 ToBellTask.reviewer_id == username,
-                ToBellTask.due_at <= datetime.combine(today, time.max.replace(microsecond=0)),
+                ToBellTask.due_at <= end_of_day(today),
             ),
         )
     else:
         query = query.filter(
             ToBellTask.status.notin_(["done", "archived"]),
             or_(
-                ToBellTask.due_at <= datetime.combine(today, time.max.replace(microsecond=0)),
+                ToBellTask.due_at <= end_of_day(today),
                 ToBellTask.assigned_to == username,
                 ToBellTask.reviewer_id == username,
             ),
@@ -199,6 +280,16 @@ def list_tasks(
     return pinned_tasks + other_tasks
 
 
+def _visible_project_clause():
+    """カレンダー専用プロジェクトのタスクを除く条件。
+
+    リスト・カンバン・サマリー件数で共通に使う。以前はサマリーだけが除外しておらず、
+    「要対応 1件」と出るのに一覧は空、という食い違いが起きていた。
+    """
+    hidden_subq = db.session.query(ToBellProject.id).filter(ToBellProject.calendar_only.is_(True))
+    return or_(ToBellTask.project_id.is_(None), ToBellTask.project_id.notin_(hidden_subq))
+
+
 def office_user_options(username: str) -> list[User]:
     actor = User.query.filter_by(username=username).first()
     if actor is None or actor.office_id is None:
@@ -206,7 +297,14 @@ def office_user_options(username: str) -> list[User]:
     return User.query.filter_by(office_id=actor.office_id).order_by(User.name, User.username).all()
 
 
-def create_task(username: str, payload: dict[str, Any]) -> ToBellTask:
+def create_task(username: str, payload: dict[str, Any], *, allow_source: bool = False) -> ToBellTask:
+    """タスクを新規作成する。
+
+    ``allow_source`` は他ツール連携（CloudShift / 健診PLUS / Googleカレンダー）から
+    呼ぶときだけ True にする。利用者のリクエスト経由で ``source_tool`` を受け付けると、
+    連携タスクを詐称して「通常フィルタから消え、一定期間で自動削除される」タスクを
+    作れてしまうため、既定では無視する。
+    """
     title = str(payload.get("title") or "").strip()
     if not title:
         raise ToBellInputError("title", "タスク名を入力してください。")
@@ -221,16 +319,17 @@ def create_task(username: str, payload: dict[str, Any]) -> ToBellTask:
         description=str(payload.get("description") or "").strip(),
         status=status,
         priority=priority,
-        due_at=resolve_due_at(payload),
+        # 期日未指定なら「追加した日の終日」。カレンダーに必ず並ぶようにするため。
+        due_at=resolve_due_at_for_new_task(payload),
         start_at=parse_datetime(payload.get("start_at"), "start_at"),
         created_by=username,
         assigned_to=assigned_to,
         reviewer_id=reviewer_id,
         manual_progress=_int_between(payload.get("manual_progress"), 0, 100, 0),
         project_id=_coerce_project(username, payload.get("project_id")),
-        source_tool=str(payload.get("source_tool") or "").strip() or None,
-        source_ref_type=str(payload.get("source_ref_type") or "").strip() or None,
-        source_ref_id=str(payload.get("source_ref_id") or "").strip() or None,
+        source_tool=(str(payload.get("source_tool") or "").strip() or None) if allow_source else None,
+        source_ref_type=(str(payload.get("source_ref_type") or "").strip() or None) if allow_source else None,
+        source_ref_id=(str(payload.get("source_ref_id") or "").strip() or None) if allow_source else None,
         pinned=_truthy(payload.get("pinned")),
     )
     db.session.add(task)
@@ -265,10 +364,8 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
             task.completed_at = None
     if "priority" in payload:
         task.priority = _choice(payload.get("priority"), VALID_PRIORITIES, task.priority)
-    if "due_at" in payload:
-        task.due_at = resolve_due_at(payload)
-    elif "due_date" in payload or "due_time" in payload:
-        task.due_at = resolve_due_at(payload)
+    if "due_at" in payload or "due_date" in payload or "due_time" in payload:
+        task.due_at = _resolve_due_at_for_update(task, payload)
     if "start_at" in payload:
         task.start_at = parse_datetime(payload.get("start_at"), "start_at")
     if "assigned_to" in payload:
@@ -291,6 +388,30 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
     task.updated_at = utc_now()
     db.session.commit()
     return task
+
+
+def _resolve_due_at_for_update(task: ToBellTask, payload: dict[str, Any]) -> datetime | None:
+    """更新時の期日。終日タスクが「時刻指定あり」に化けないよう保護する。
+
+    画面は終日チェックの状態を ``due_all_day`` として必ず送る。ただし古いキャッシュの
+    JS など、フラグを送らないクライアントも起こりうる。その場合に限り、
+    「同じ日の 23:59（datetime-local が 23:59:59 を表現できずに落ちた形）」を
+    元の終日として扱い、意図しない通知が発生しないようにする。
+    """
+    resolved = resolve_due_at(payload)
+    if "due_all_day" in payload or resolved is None:
+        return resolved
+    was_all_day = task.is_all_day()
+    looks_truncated = (
+        resolved.hour == 23
+        and resolved.minute == 59
+        and resolved.second == 0
+        and task.due_at is not None
+        and resolved.date() == task.due_at.date()
+    )
+    if was_all_day and looks_truncated:
+        return end_of_day(resolved.date())
+    return resolved
 
 
 def complete_task(task: ToBellTask) -> ToBellTask:
@@ -316,8 +437,29 @@ def delete_task(task: ToBellTask) -> None:
 
 def purge_task(task: ToBellTask) -> None:
     """サブタスク・コメント・通知ごとタスクを完全に削除する（元に戻せない）。"""
+    remove_attachment_files(task)
     db.session.delete(task)
     db.session.commit()
+
+
+def remove_attachment_files(task: ToBellTask) -> int:
+    """タスクに紐づく添付ファイルの実体をディスクから削除する。
+
+    DB 行は cascade で消えるが、実体は残る。タスクの完全削除・一括削除・日次
+    クリーンアップのいずれからも呼び、孤児ファイルが溜まらないようにする。
+    """
+    removed = 0
+    for attachment in list(task.attachments or []):
+        if not attachment.stored_path:
+            continue
+        try:
+            path = Path(attachment.stored_path)
+            if path.is_file():
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def _match_tasks_by_name(username: str, name: str, match: str):
@@ -327,8 +469,10 @@ def _match_tasks_by_name(username: str, name: str, match: str):
         raise ToBellInputError("name", "削除するタスク名を入力してください。")
     query = ToBellTask.query.filter(visible_task_filter(username))
     if match == "contains":
-        like = f"%{keyword}%"
-        query = query.filter(ToBellTask.title.ilike(like))
+        # `%` や `_` は LIKE のワイルドカード。エスケープしないと "%" の1文字入力で
+        # 操作可能な全タスクが一致し、そのまま完全削除されてしまう。
+        like = _like_pattern(keyword)
+        query = query.filter(ToBellTask.title.ilike(like, escape="\\"))
     else:  # exact（既定）— 前後の空白差を吸収するため大文字小文字無視の完全一致
         query = query.filter(func.lower(ToBellTask.title) == keyword.lower())
     return query.order_by(ToBellTask.updated_at.desc()).all()
@@ -362,6 +506,7 @@ def bulk_delete_tasks_by_name(username: str, name: str, match: str = "exact") ->
                 to_bell_calendar.on_task_deleted(task)
             except Exception:  # noqa: BLE001 - 連携の失敗で本体削除を止めない
                 pass
+        remove_attachment_files(task)
         db.session.delete(task)
         deleted += 1
     db.session.commit()
@@ -432,10 +577,20 @@ def list_notifications(username: str) -> list[ToBellNotification]:
     return ToBellNotification.query.filter_by(user_id=username).order_by(ToBellNotification.created_at.desc()).limit(100).all()
 
 
+def _mark_read(notification: ToBellNotification, now: datetime) -> None:
+    notification.is_read = True
+    notification.read_at = notification.read_at or now
+    # タスクに紐づかない通知（プロジェクト通知など）は「完了させる対象」が無いため、
+    # 既読になった時点で解決済みにする。そうしないと要対応バッジを消す手段が無く、
+    # 60日の自動整理まで「要対応 1件」が出続けてしまう。
+    if notification.task_id is None and not notification.is_resolved:
+        notification.is_resolved = True
+        notification.resolved_at = now
+
+
 def mark_notification_read(notification_id: int, username: str) -> ToBellNotification:
     notification = _get_notification(notification_id, username)
-    notification.is_read = True
-    notification.read_at = utc_now()
+    _mark_read(notification, utc_now())
     db.session.commit()
     return notification
 
@@ -451,24 +606,36 @@ def resolve_notification(notification_id: int, username: str) -> ToBellNotificat
 
 
 def mark_all_notifications_read(username: str) -> int:
-    rows = ToBellNotification.query.filter_by(user_id=username, is_read=False).all()
+    now = utc_now()
+    rows = ToBellNotification.query.filter(
+        ToBellNotification.user_id == username,
+        or_(ToBellNotification.is_read.is_(False), ToBellNotification.is_resolved.is_(False)),
+    ).all()
+    updated = 0
     for row in rows:
-        row.is_read = True
-        row.read_at = utc_now()
+        if row.is_read and row.is_resolved:
+            continue
+        was_read = row.is_read
+        _mark_read(row, now)
+        if not was_read:
+            updated += 1
     db.session.commit()
-    return len(rows)
+    return updated
 
 
 def notification_summary(username: str) -> dict[str, Any]:
     today = local_today()
-    today_end = datetime.combine(today, time.max.replace(microsecond=0))
+    now = local_now()
+    today_end = end_of_day(today)
     unread_count = ToBellNotification.query.filter_by(user_id=username, is_read=False).count()
-    # 連携（自動生成）タスクは通常フィルタに出さないため、サマリーの件数からも除外する
-    # （バッジ件数と画面に見えるタスクを一致させる）。
+    # 連携（自動生成）タスクとカレンダー専用プロジェクトのタスクは通常フィルタに
+    # 出さないため、サマリーの件数からも除外する（バッジ件数と画面に見えるタスクを
+    # 一致させる。以前はカレンダー専用分だけがバッジに乗り、一覧は空になっていた）。
     active_query = ToBellTask.query.filter(
         visible_task_filter(username),
         ToBellTask.status.notin_(["done", "archived"]),
         _manual_task_clause(),
+        _visible_project_clause(),
     )
     due_action_count = active_query.filter(
         or_(ToBellTask.assigned_to == username, ToBellTask.reviewer_id == username, ToBellTask.due_at <= today_end),
@@ -478,7 +645,7 @@ def notification_summary(username: str) -> dict[str, Any]:
     todo_count = active_query.filter(ToBellTask.status == "todo").count()
     doing_count = active_query.filter(ToBellTask.status.in_(["doing", "blocked", "review", "returned"])).count()
     urgent_count = active_query.filter(ToBellTask.priority == "urgent").count()
-    overdue_count = active_query.filter(ToBellTask.due_at < datetime.combine(today, time.min)).count()
+    overdue_count = active_query.filter(ToBellTask.due_at < now).count()
     severity = "danger" if action_count else ("warning" if unread_count else "info")
     badges = []
     if urgent_count:
@@ -506,11 +673,7 @@ def has_explicit_notification_time(task: ToBellTask) -> bool:
     """Only tasks with a user-entered time should fire push/local reminders."""
     if task.due_at is None:
         return False
-    return not (
-        task.due_at.hour == 23
-        and task.due_at.minute == 59
-        and task.due_at.second == 59
-    )
+    return not task.is_all_day()
 
 
 def list_due_notification_tasks(username: str, *, now: datetime | None = None) -> list[ToBellTask]:
@@ -550,13 +713,17 @@ def cleanup_expired_records(
         )
     )
     # 連携（CloudShift / 健診PLUS / Googleカレンダー）から自動追加されたタスクは、
-    # 追加(created_at)から一定期間（既定1か月）を過ぎたら無条件で削除する。
+    # 追加(created_at)から一定期間（既定1か月）を過ぎたら削除する。
+    # ただし「まだ先の予定」は消さない。Googleカレンダー取り込みは syncToken による
+    # 差分同期なので、一度消すと予定に変更が入らない限り二度と復活せず、2か月先の
+    # 予定が当日の1か月前に黙って消える、という事故になっていた。
     # ここでの削除は ToBell の DB 行を消すだけで、Googleカレンダー側の予定には触れない
     # （取り込みタスクは gcal_event_id を持たず、ToBell→カレンダー送信もしていないため）。
     integration_query = ToBellTask.query.filter(
         _integration_task_clause(),
         ToBellTask.created_at.isnot(None),
         ToBellTask.created_at <= integration_cutoff,
+        or_(ToBellTask.due_at.is_(None), ToBellTask.due_at <= now),
     )
 
     tasks: dict[int, ToBellTask] = {task.id: task for task in task_query.all()}
@@ -567,6 +734,7 @@ def cleanup_expired_records(
         tasks[task.id] = task
     task_ids = list(tasks.keys())
     for task in tasks.values():
+        remove_attachment_files(task)
         db.session.delete(task)
 
     notification_query = ToBellNotification.query.filter(ToBellNotification.created_at <= cutoff)
@@ -627,8 +795,13 @@ def resolve_share_token(token: str) -> User | None:
     user = User.query.filter_by(username=row.user_id).first()
     if user is None:
         return None
-    row.last_used_at = utc_now()
-    db.session.commit()
+    # last_used_at は「最後に使われた日」が分かれば十分。毎リクエスト書くと
+    # ToBell 配下の全API呼び出しが DB への UPDATE+COMMIT を伴ってしまうため、
+    # 前回更新から一定時間空いたときだけ書き込む。
+    now = utc_now()
+    if row.last_used_at is None or (now - row.last_used_at) >= SHARE_TOKEN_TOUCH_INTERVAL:
+        row.last_used_at = now
+        db.session.commit()
     return user
 
 
@@ -769,6 +942,7 @@ def reorder_projects(username: str, ordered_ids: Any) -> int:
     if not isinstance(ordered_ids, (list, tuple)):
         raise ToBellInputError("ordered_ids", "並び替えるプロジェクトを指定してください。")
     office_id = _user_office_id(username)
+    is_admin = _is_admin(username)
     visible = {
         p.id: p
         for p in ToBellProject.query.filter(_project_visible_filter(username, office_id)).all()
@@ -778,6 +952,10 @@ def reorder_projects(username: str, ordered_ids: Any) -> int:
         pid = _safe_int(raw)
         project = visible.get(pid) if pid else None
         if project is None:
+            continue
+        # sort_order は全員で共有するカラムなので、書き換えられるのは作成者だけにする。
+        # （以前は所属内の誰でも並べ替えでき、他人の画面の並びまで変わっていた）
+        if project.owner_id != username and not is_admin:
             continue
         if project.sort_order != index:
             project.sort_order = index
@@ -867,8 +1045,10 @@ def list_assignable_tasks(project: ToBellProject, username: str, *, search: str 
         or_(ToBellTask.project_id.is_(None), ToBellTask.project_id != project.id),
     )
     if search:
-        like = f"%{search.strip()}%"
-        query = query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
+        like = _like_pattern(search.strip())
+        query = query.filter(
+            or_(ToBellTask.title.ilike(like, escape="\\"), ToBellTask.description.ilike(like, escape="\\"))
+        )
     return query.order_by(
         ToBellTask.status == "done",
         ToBellTask.due_at.is_(None),
@@ -1059,10 +1239,10 @@ def instantiate_template(template: ToBellTemplate, username: str, payload: dict[
     if payload.get("due_at") or payload.get("due_date") or payload.get("due_time"):
         due_at = resolve_due_at(payload)
     elif tpl.get("due_in_days") is not None:
-        due_at = datetime.combine(
-            local_today() + timedelta(days=int(tpl.get("due_in_days") or 0)),
-            time.max.replace(microsecond=0),
-        )
+        due_at = end_of_day(local_today() + timedelta(days=int(tpl.get("due_in_days") or 0)))
+    if due_at is None:
+        # 新規タスクと同じ既定（追加した日の終日）にそろえる。
+        due_at = default_due_at()
     task = ToBellTask(
         title=title[:MAX_TITLE_LEN],
         description=str(tpl.get("description") or "").strip(),

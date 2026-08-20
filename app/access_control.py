@@ -276,6 +276,23 @@ def user_has_tool_access(tool_key: str, user=None) -> bool:
     return False
 
 
+def username_has_tool_access(username: str, tool_key: str) -> bool:
+    """username 指定でツールアクセス権を判定する。
+
+    リクエスト外（スケジューラ・バックグラウンドジョブ）からも呼べるようにするため、
+    ``current_user`` ではなく username から User を引く。
+    """
+    name = (username or "").strip()
+    if not name:
+        return False
+    user = User.query.filter_by(username=name).first()
+    if user is None:
+        return False
+    # user_has_tool_access は is_authenticated を見るため、DB から引いた User でも
+    # 判定できるよう UserMixin の既定値（True）に頼る。
+    return user_has_tool_access(tool_key, user)
+
+
 def _tool_visibility_map() -> dict[str, bool]:
     """ToolSettingsからツールの公開/非公開マップを返す。未登録は公開扱い。"""
     rows = ToolSettings.query.all()

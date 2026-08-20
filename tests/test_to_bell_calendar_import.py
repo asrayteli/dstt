@@ -438,9 +438,11 @@ def test_incremental_sync_sends_synctoken_with_pagetoken(app_ctx, monkeypatch):
 
     _create_user(app_ctx, "alice")
     _enable_import(app_ctx, "alice")
-    _connect_account(app_ctx, "alice", sync_token="prev-token")
+    # 取り込み範囲の変更は syncToken をリセットする（＝次回フル取得）ため、
+    # 増分取得を検証するテストでは接続前にモードを決めておく。
     with app_ctx.app_context():
         imp.set_import_mode("alice", "all")
+    _connect_account(app_ctx, "alice", sync_token="prev-token")
 
     fake = FakeGet([
         {"items": [_event("e1", "A", start={"date": "2026-06-01"})], "nextPageToken": "p2"},
@@ -485,9 +487,9 @@ def test_incremental_sync_params_match_initial(app_ctx, monkeypatch):
 
     _create_user(app_ctx, "alice")
     _enable_import(app_ctx, "alice")
-    _connect_account(app_ctx, "alice", sync_token="prev")
     with app_ctx.app_context():
         imp.set_import_mode("alice", "all")
+    _connect_account(app_ctx, "alice", sync_token="prev")
 
     fake = FakeGet([{"items": [], "nextSyncToken": "t"}])
     _patch_get(monkeypatch, fake)
@@ -781,3 +783,82 @@ def test_import_now_endpoint_runs(app_ctx, monkeypatch):
     assert data["result"]["created"] == 1
     with app_ctx.app_context():
         assert ToBellTask.query.count() == 1
+
+
+def test_changing_import_mode_forces_a_full_resync(app_ctx, monkeypatch):
+    """取り込む範囲を広げたら、既存の予定も取り込み直す。
+
+    syncToken による差分同期は「変更のあった予定」しか返さない。モードを変えても
+    トークンを据え置くと、範囲を広げたのに何も増えず「設定が効かない」状態になる。
+    """
+    from app.models import ToBellGoogleAccount, ToBellTask
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")
+
+    fake = FakeGet([
+        # 1回目（フル・末尾TBのみ）
+        {
+            "items": [
+                _event("e1", "請求 TB", start={"date": "2026-09-01"}),
+                _event("e2", "雑談", start={"date": "2026-09-02"}),
+            ],
+            "nextSyncToken": "tok-1",
+        },
+        # 2回目：モード変更でフル取得に戻るので、同じ一覧が再度返ってくる
+        {
+            "items": [
+                _event("e1", "請求 TB", start={"date": "2026-09-01"}),
+                _event("e2", "雑談", start={"date": "2026-09-02"}),
+            ],
+            "nextSyncToken": "tok-2",
+        },
+    ])
+    _patch_get(monkeypatch, fake)
+
+    with app_ctx.app_context():
+        assert imp.import_for_user("alice")["created"] == 1
+        imp.set_import_mode("alice", "all")
+        assert ToBellGoogleAccount.query.filter_by(username="alice").first().calendar_sync_token is None
+        assert imp.import_for_user("alice")["created"] == 1
+        assert sorted(task.title for task in ToBellTask.query.all()) == ["請求", "雑談"]
+
+    # 2回目は syncToken を送らずフル取得している。
+    assert "syncToken" not in fake.calls[1]["params"]
+    assert "timeMin" in fake.calls[1]["params"]
+
+
+def test_same_mode_keeps_the_sync_token(app_ctx, monkeypatch):
+    """同じ値を選び直しただけならフル再取得しない（無駄な全件取得を避ける）。"""
+    from app.models import ToBellGoogleAccount
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice", sync_token="tok-keep")
+
+    with app_ctx.app_context():
+        imp.set_import_mode("alice", imp.DEFAULT_MODE)
+        assert ToBellGoogleAccount.query.filter_by(username="alice").first().calendar_sync_token == "tok-keep"
+
+
+def test_initial_window_reaches_a_year_ahead(app_ctx, monkeypatch):
+    """先の予定が「変更が入るまで取り込まれない」状態にならないようにする。"""
+    from datetime import datetime as _dt
+
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")
+
+    fake = FakeGet([{"items": [], "nextSyncToken": "t"}])
+    _patch_get(monkeypatch, fake)
+    with app_ctx.app_context():
+        imp.import_for_user("alice")
+
+    params = fake.calls[0]["params"]
+    span = _dt.fromisoformat(params["timeMax"][:-1]) - _dt.fromisoformat(params["timeMin"][:-1])
+    assert span.days >= 365

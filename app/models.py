@@ -1584,6 +1584,17 @@ class ToBellTask(db.Model):
             return int(round((done / len(self.subtasks)) * 100))
         return max(0, min(100, int(self.manual_progress or 0)))
 
+    def is_all_day(self) -> bool:
+        """時刻を指定していない「終日タスク」か。
+
+        ToBell は時刻未指定のタスクを当日の 23:59:59 として保存する規約になっている
+        （app/services/to_bell_service.py の END_OF_DAY）。画面はこのフラグを見て
+        時刻表示を出し分け、保存時に 23:59:59 を維持する。
+        """
+        if self.due_at is None:
+            return False
+        return (self.due_at.hour, self.due_at.minute, self.due_at.second) == (23, 59, 59)
+
     def to_dict(self, include_detail: bool = True) -> dict:
         data = {
             'id': self.id,
@@ -1592,6 +1603,7 @@ class ToBellTask(db.Model):
             'status': self.status,
             'priority': self.priority,
             'due_at': self.due_at.isoformat() if self.due_at else None,
+            'due_all_day': self.is_all_day(),
             'start_at': self.start_at.isoformat() if self.start_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'created_by': self.created_by,
