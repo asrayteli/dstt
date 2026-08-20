@@ -596,6 +596,7 @@ def test_to_bell_template_from_task_and_instantiate(app_ctx):
         "/tools/to_bell/api/tasks",
         json={"title": "毎月の手順", "priority": "high", "tags": "月次"},
     ).get_json()
+    assert task["due_auto"] is True
     client.post(f"/tools/to_bell/api/tasks/{task['id']}/subtasks", json={"title": "手順1"})
     client.post(f"/tools/to_bell/api/tasks/{task['id']}/subtasks", json={"title": "手順2"})
 
@@ -615,6 +616,7 @@ def test_to_bell_template_from_task_and_instantiate(app_ctx):
     new_task = instance.get_json()
     assert new_task["title"] == "毎月の手順"
     assert new_task["priority"] == "high"
+    assert new_task["due_auto"] is True
     assert len(new_task["subtasks"]) == 2
 
     assert client.delete(f"/tools/to_bell/api/templates/{template_id}").status_code == 200

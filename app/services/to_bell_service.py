@@ -1252,7 +1252,10 @@ def create_blank_template(username: str, payload: dict[str, Any]) -> ToBellTempl
 
 def create_template_from_task(task: ToBellTask, username: str, payload: dict[str, Any]) -> ToBellTemplate:
     due_in_days = None
-    if task.due_at is not None:
+    # 期日未指定のため自動で入った日付は、テンプレートの明示的な期限として
+    # 引き継がない。引き継ぐと生成タスクの due_auto が False になり、利用者が
+    # 期限を決めていないのに翌日から「期限切れ」扱いになってしまう。
+    if task.due_at is not None and not task.due_auto:
         due_in_days = max(0, (task.due_at.date() - local_today()).days)
     template_payload = {
         "title": task.title,
