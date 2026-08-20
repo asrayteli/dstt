@@ -394,21 +394,23 @@ def _hc_employee_mail_contact(record) -> tuple[str, str]:
     return office_name, contact
 
 
-def _hc_queue_employee_mail(record, *, now: datetime, suppressed: bool) -> None:
+def _hc_queue_employee_mail(record, *, now: datetime, suppressed: bool) -> bool:
     """対象日に達した通知について、社員本人あてメールをキューに積む。
 
     例外は握りつぶす。メールが積めないことで健診レコードの保存や
     ToBell リマインドを止めてはならない。
     """
-    if suppressed:
-        return
     try:
         from app.tools.health_check import office_mail_enabled
-        from app.services.health_check_mail import queue_notification, can_send_to
+        from app.services.health_check_mail import (
+            queue_notification,
+            can_send_to,
+            cancel_pending_notifications,
+            dedupe_key,
+        )
 
+        keep_keys: set[str] = set()
         ok, _reason = can_send_to(record)
-        if not ok:
-            return
 
         office_code = getattr(record, "office_code", None)
         plans = (
@@ -422,20 +424,27 @@ def _hc_queue_employee_mail(record, *, now: datetime, suppressed: bool) -> None:
              and record.secondary_exam_date is None),
         )
         office_name, contact = _hc_employee_mail_contact(record)
-        for kind, basis, condition in plans:
-            if not condition or basis is None:
-                continue
-            if not _hc_should_materialize(basis, now):
-                continue
-            if not office_mail_enabled(office_code, kind):
-                continue
-            queue_notification(
-                record, kind, basis,
-                office_name=office_name, contact_name=contact,
-                created_by="health_check", commit=False,
-            )
+        if not suppressed and ok:
+            for kind, basis, condition in plans:
+                if not condition or basis is None:
+                    continue
+                if not _hc_should_materialize(basis, now):
+                    continue
+                if not office_mail_enabled(office_code, kind):
+                    continue
+                queue_notification(
+                    record, kind, basis,
+                    office_name=office_name, contact_name=contact,
+                    created_by="health_check", commit=False,
+                )
+                keep_keys.add(dedupe_key(record.id, kind, basis))
+
+        # 予定変更・受診完了・配信停止などで現在の条件から外れた未送信分を止める。
+        cancel_pending_notifications(record.id, keep_keys=keep_keys, commit=False)
+        return True
     except Exception:  # noqa: BLE001
         logger.exception("健診PLUS 本人あてメールのキュー投入に失敗")
+        return False
 
 
 def _ensure_reminder_task(
@@ -536,7 +545,7 @@ def ensure_health_check_reminders(
     global_lead_days: int = HEALTH_CHECK_DEFAULT_LEAD_DAYS,
     now: datetime | None = None,
     commit: bool = True,
-) -> None:
+) -> bool:
     """健診レコードの状態から、3種のリマインドを同期する。
 
     対象日（健康診断予約日／深夜従事者の受診日②／二次検査受診推奨日）の
@@ -554,7 +563,7 @@ def ensure_health_check_reminders(
     # 本人あてメールは ToBell と同じ発火条件（対象日の前日に確定）で積む。
     # 担当者のオプトインとは独立で、営業所ごとの送信設定だけで決まる
     # （社員はDSTTアカウントを持たないためオプトインの仕組みが無い）。
-    _hc_queue_employee_mail(record, now=now, suppressed=suppressed)
+    mail_ok = _hc_queue_employee_mail(record, now=now, suppressed=suppressed)
 
     def _sync(ref_type: str, basis, condition: bool, priority: str) -> "ToBellTask | None":
         """対象日 basis の前日以降になったら、オプトイン済みの各宛先にタスク化する。
@@ -629,10 +638,12 @@ def ensure_health_check_reminders(
 
         if commit:
             _commit_safely()
+        return mail_ok
     except Exception:  # noqa: BLE001
         # セーブポイントは with を抜ける時点で巻き戻り済み。ここで
         # db.session.rollback() を呼んではならない（呼び出し元の保存が消える）。
         logger.exception("health_check リマインダーの同期で失敗")
+        return False
 
 
 def close_health_check_reminders(record_id: int, *, commit: bool = True) -> None:
@@ -640,6 +651,8 @@ def close_health_check_reminders(record_id: int, *, commit: bool = True) -> None
     try:
         for ref_type in ("reservation", "night_second", "secondary_exam"):
             _close_reminder_tasks_for_record(ref_type, record_id, set())
+        from app.services.health_check_mail import cancel_pending_notifications
+        cancel_pending_notifications(record_id, include_manual=True, commit=False)
         if commit:
             _commit_safely()
     except Exception:  # noqa: BLE001
@@ -651,6 +664,7 @@ def sweep_health_check_reminders(*, now: datetime | None = None) -> dict[str, in
     """全レコードのリマインドを再同期する（日次実行で due_at を当日通知へ繰り上げる）。"""
     now = now or local_now()
     processed = 0
+    failed = 0
     try:
         from app.models import HealthCheckRecord
         from app.tools.health_check import (
@@ -688,12 +702,56 @@ def sweep_health_check_reminders(*, now: datetime | None = None) -> dict[str, in
                 _sync_linked_record(record)
             except Exception:  # noqa: BLE001
                 logger.exception("health_check 名簿同期に失敗 (record_id=%s)", record.id)
-            ensure_health_check_reminders(
+                failed += 1
+            if not ensure_health_check_reminders(
                 record, global_lead_days=global_lead, now=now, commit=False
-            )
+            ):
+                failed += 1
             processed += 1
         _commit_safely()
     except Exception:  # noqa: BLE001
         logger.exception("health_check リマインダーの日次スイープで失敗")
         db.session.rollback()
-    return {"processed": processed}
+        failed += 1
+    return {"processed": processed, "failed": failed}
+
+
+def resync_health_check_recipient(username: str, *, now: datetime | None = None) -> dict[str, int]:
+    """個人のToBell連携設定変更を、該当する健診タスクへ即時反映する。
+
+    前日に作成済みのタスクがある状態で利用者が通知をOFFにした場合、日次
+    スイープを待つと当日9時のpushに間に合わない可能性があるため、設定保存時に
+    その人が宛先となるアクティブなレコードだけを再同期する。
+    """
+    now = now or local_now()
+    processed = 0
+    failed = 0
+    try:
+        from app.models import HealthCheckRecord
+        candidates = HealthCheckRecord.query.filter(db.or_(
+            db.and_(
+                HealthCheckRecord.reservation_date.isnot(None),
+                HealthCheckRecord.exam_date.is_(None),
+            ),
+            db.and_(
+                HealthCheckRecord.needs_recheck.is_(True),
+                HealthCheckRecord.secondary_recommended_date.isnot(None),
+                HealthCheckRecord.secondary_exam_date.is_(None),
+            ),
+            db.and_(
+                HealthCheckRecord.is_night_worker.is_(True),
+                HealthCheckRecord.exam_date_2.is_(None),
+            ),
+        )).all()
+        for record in candidates:
+            if username not in _hc_recipients(record):
+                continue
+            if not ensure_health_check_reminders(record, now=now, commit=False):
+                failed += 1
+            processed += 1
+        _commit_safely()
+    except Exception:  # noqa: BLE001
+        logger.exception("health_check 個人通知設定の再同期に失敗 (username=%s)", username)
+        db.session.rollback()
+        failed += 1
+    return {"processed": processed, "failed": failed}

@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date
+from datetime import date, datetime, time
 
+from app.models import MailMessage, db
 from app.services.mail_service import queue_mail
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,34 @@ def dedupe_key(record_id: int, kind: str, basis_date: date) -> str:
     return f"health_check:{record_id}:{kind}:{basis_date.isoformat()}"
 
 
+def cancel_pending_notifications(record_id: int, *, keep_keys: set[str] | None = None,
+                                 include_manual: bool = False, commit: bool = True) -> int:
+    """条件から外れた本人あてメールを送信前にキャンセルする。
+
+    自動通知は対象日の前日にキューへ積むため、その後に受診完了・日付変更・
+    送信停止・レコード削除が起きる可能性がある。送信スケジューラが拾う前に
+    ``canceled`` にして、古い予定のメールが本人へ届かないようにする。
+    """
+    keep = keep_keys or set()
+    query = MailMessage.query.filter_by(
+        category="health_check",
+        related_type="health_check_record",
+        related_key=str(record_id),
+    ).filter(MailMessage.status.in_(("queued", "failed", "skipped")))
+    if not include_manual:
+        query = query.filter(MailMessage.dedupe_key.like(f"health_check:{record_id}:%"))
+    canceled = 0
+    for message in query.all():
+        if message.dedupe_key in keep:
+            continue
+        message.status = "canceled"
+        message.last_error = "健診情報または通知設定の変更により送信を取り消しました。"
+        canceled += 1
+    if commit and canceled:
+        db.session.commit()
+    return canceled
+
+
 def can_send_to(record) -> tuple[bool, str]:
     """このレコードに本人あてメールを送ってよいか。(可否, 理由) を返す。"""
     if getattr(record, "email_opt_out", False):
@@ -146,6 +175,9 @@ def queue_notification(record, kind: str, basis_date: date, *, office_name: str 
         dedupe_key=dedupe_key(record.id, kind, basis_date),
         related_type="health_check_record",
         related_key=str(record.id),
+        # ToBell と同じく対象日9:00に通知する。前日にはキューへ積むだけで、
+        # 共通メールスケジューラはこの時刻まで実送信しない。
+        scheduled_at=datetime.combine(basis_date, time(9, 0)),
         created_by=created_by,
         commit=commit,
     )

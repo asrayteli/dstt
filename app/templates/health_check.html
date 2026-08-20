@@ -97,7 +97,7 @@
       <div class="ml-auto flex flex-wrap items-center gap-2">
         <button type="button" class="hc-btn-ghost" onclick="HC.openColumnsModal()">🗂️ 表示項目</button>
         <button type="button" class="hc-btn-ghost" onclick="HC.resolveManagers()">担当者を自動紐付け</button>
-        <button type="button" class="hc-btn-ghost" onclick="HC.exportCsv()">CSV出力</button>
+        <button type="button" class="hc-btn-ghost" onclick="HC.openExportModal()">CSV出力</button>
         <button type="button" class="hc-btn-ghost" onclick="HC.openSettingsModal()">⚙ 設定</button>
       </div>
     </div>
@@ -179,6 +179,50 @@
     <div class="hc-modal-foot">
       <button class="hc-btn-ghost" onclick="HC.closeColumnsModal()">キャンセル</button>
       <button class="hc-btn-primary" onclick="HC.applyColumns()">適用</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== モーダル: CSV出力 ===== -->
+<div id="export-modal" class="hc-modal hidden" style="z-index:55;">
+  <div class="hc-modal-backdrop" onclick="HC.closeExportModal()"></div>
+  <div class="hc-modal-panel max-w-3xl">
+    <div class="hc-modal-head">
+      <h2 class="text-lg font-bold text-gray-800">CSV出力の設定</h2>
+      <button onclick="HC.closeExportModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+    </div>
+    <div class="hc-modal-body space-y-5">
+      <div class="rounded-lg border border-teal-100 bg-teal-50/70 p-3">
+        <div class="text-xs font-semibold text-teal-800 mb-1.5">現在の一覧条件</div>
+        <div id="export-base-summary" class="flex flex-wrap gap-1.5 text-xs text-teal-900"></div>
+        <p class="mt-2 text-xs text-teal-700">この一覧の中から、下の追加条件をすべて満たす方を出力します。</p>
+      </div>
+
+      <div>
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+          <div class="hc-section-title !mb-0 mr-auto">出力する項目</div>
+          <button type="button" class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.selectAllExportColumns(true)">すべて選択</button>
+          <button type="button" class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.selectAllExportColumns(false)">すべて解除</button>
+          <button type="button" class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.useVisibleExportColumns()">一覧の表示項目に合わせる</button>
+        </div>
+        <div id="export-columns" class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1.5 max-h-44 overflow-y-auto border border-gray-100 rounded-lg p-3"></div>
+      </div>
+
+      <div>
+        <div class="flex items-center gap-2 mb-2">
+          <div class="hc-section-title !mb-0 mr-auto">追加の絞り込み条件</div>
+          <button type="button" class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.clearExportConditions()">条件をクリア</button>
+          <button type="button" class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.addExportCondition()">＋ 条件を追加</button>
+        </div>
+        <div id="export-conditions" class="space-y-2"></div>
+        <p id="export-conditions-empty" class="hidden text-sm text-gray-400 border border-dashed border-gray-200 rounded-lg p-4 text-center">追加条件はありません。現在の一覧をそのまま出力します。</p>
+        <p class="mt-2 text-xs text-gray-500">複数の条件は「すべて満たす（AND）」で判定します。前回CSVを出力したときの項目と追加条件は、このブラウザに保存されます。</p>
+      </div>
+    </div>
+    <div class="hc-modal-foot">
+      <span id="export-modal-error" class="text-sm text-red-600 mr-auto"></span>
+      <button class="hc-btn-ghost" onclick="HC.closeExportModal()">キャンセル</button>
+      <button class="hc-btn-primary" onclick="HC.exportCsv()">この条件でCSV出力</button>
     </div>
   </div>
 </div>
@@ -517,6 +561,48 @@ const HC = (function(){
   let visibleColumns = loadColumnPref();
   let columnDraft = null;  // モーダル編集中の一時選択
 
+  // ---- CSV出力の項目・追加条件 ----
+  const EXPORT_COLUMNS = JSON.parse('{{ export_columns|tojson }}').map(([key,label])=>({key,label}));
+  const EXPORT_COLUMN_MAP = {}; EXPORT_COLUMNS.forEach(c=>EXPORT_COLUMN_MAP[c.key]=c);
+  const EXPORT_STORAGE_KEY = 'hc_export_options_v1';
+  const EXPORT_FILTER_FIELDS = [
+    {key:'status', label:'ステータス', kind:'enum', values:[
+      ['未予約','未予約'],['予約済','予約済'],['受診済','受診済'],['再検査対象','再検査対象'],['二次案内済','二次案内済'],['二次完了','二次完了']]},
+    {key:'record_type', label:'区分', kind:'enum', values:[['linked','名簿連携'],['pre_hire','入社前'],['internal','内勤者']]},
+    {key:'employee_number', label:'社員番号', kind:'text'},
+    {key:'employee_name', label:'社員名', kind:'text'},
+    {key:'employee_type', label:'社員区分', kind:'text'},
+    {key:'assignment_site', label:'専従先名', kind:'text'},
+    {key:'manager_name', label:'管理担当名', kind:'text'},
+    {key:'medical_institution', label:'受診医療機関名', kind:'text'},
+    {key:'recheck_items', label:'再検査項目', kind:'text'},
+    {key:'secondary_result', label:'二次検査結果', kind:'text'},
+    {key:'remarks', label:'備考', kind:'text'},
+    {key:'hire_date', label:'入社日付', kind:'date'},
+    {key:'birth_date', label:'生年月日', kind:'date'},
+    {key:'reservation_date', label:'予約日', kind:'date'},
+    {key:'exam_date', label:'受診日', kind:'date'},
+    {key:'exam_date_2', label:'受診日②（深夜2回目）', kind:'date'},
+    {key:'secondary_recommended_date', label:'二次検査受診推奨日', kind:'date'},
+    {key:'secondary_guide_sent_date', label:'二次検査案内送付日', kind:'date'},
+    {key:'secondary_exam_date', label:'二次検診受診日', kind:'date'},
+    {key:'nasva_reservation_date', label:'NASVA予約日', kind:'date'},
+    {key:'nasva_exam_date', label:'NASVA受診日', kind:'date'},
+    {key:'is_night_worker', label:'深夜従事者', kind:'bool'},
+    {key:'needs_recheck', label:'再検査有無', kind:'bool'},
+    {key:'is_exempt', label:'受診非対象', kind:'bool'},
+    {key:'is_kintone', label:'kintone', kind:'bool'},
+    {key:'is_retired', label:'退職者', kind:'bool'},
+  ];
+  const EXPORT_FILTER_MAP = {}; EXPORT_FILTER_FIELDS.forEach(f=>EXPORT_FILTER_MAP[f.key]=f);
+  const EXPORT_OPERATORS = {
+    text:[['contains','含む'],['not_contains','含まない'],['equals','一致する'],['not_equals','一致しない'],['empty','未入力'],['not_empty','入力あり']],
+    date:[['on','指定日'],['on_or_after','指定日以降'],['on_or_before','指定日以前'],['after','指定日より後'],['before','指定日より前'],['empty','未入力'],['not_empty','入力あり']],
+    enum:[['equals','一致する'],['not_equals','一致しない']],
+    bool:[['is_true','はい'],['is_false','いいえ']],
+  };
+  let exportDraft = null;
+
   function loadColumnPref(){
     try {
       const raw = localStorage.getItem(COLUMNS_STORAGE_KEY);
@@ -530,6 +616,29 @@ const HC = (function(){
   }
   function saveColumnPref(){
     try { localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumns)); } catch(e){}
+  }
+
+  function defaultExportPref(){
+    return {columns:EXPORT_COLUMNS.map(c=>c.key), filters:[]};
+  }
+  function loadExportPref(){
+    const fallback = defaultExportPref();
+    try {
+      const raw = localStorage.getItem(EXPORT_STORAGE_KEY);
+      if(!raw) return fallback;
+      const saved = JSON.parse(raw);
+      const columns = Array.isArray(saved.columns)
+        ? saved.columns.filter(k=>EXPORT_COLUMN_MAP[k]) : [];
+      const filters = Array.isArray(saved.filters) ? saved.filters.filter(item=>{
+        if(!item || !EXPORT_FILTER_MAP[item.field]) return false;
+        const kind = EXPORT_FILTER_MAP[item.field].kind;
+        return (EXPORT_OPERATORS[kind]||[]).some(([op])=>op===item.operator);
+      }).slice(0,20).map(item=>({field:item.field, operator:item.operator, value:String(item.value||'')})) : [];
+      return {columns:columns.length?columns:fallback.columns, filters};
+    } catch(e){ return fallback; }
+  }
+  function saveExportPref(pref){
+    try { localStorage.setItem(EXPORT_STORAGE_KEY, JSON.stringify(pref)); } catch(e){}
   }
 
   function api(url, opts){
@@ -1638,8 +1747,156 @@ const HC = (function(){
       toast(`${r.resolved} 件を紐付けました`); refresh(); }
     catch(e){ toast(e.message,'error'); }
   }
+  // ---- CSV出力 ----
+  function openExportModal(){
+    const saved = loadExportPref();
+    exportDraft = {
+      columns:saved.columns.slice(),
+      filters:saved.filters.map(item=>Object.assign({}, item)),
+    };
+    document.getElementById('export-modal-error').textContent = '';
+    renderExportBaseSummary();
+    renderExportColumns();
+    renderExportConditions();
+    show('export-modal');
+  }
+  function closeExportModal(){ hide('export-modal'); exportDraft = null; }
+  function renderExportBaseSummary(){
+    const labels = [];
+    if(state.year) labels.push(`${state.year}年度`);
+    labels.push(state.office ? `営業所：${officeName(state.office)}` : '閲覧可能な全営業所');
+    if(state.type) labels.push(`区分：${TYPE_LABEL[state.type]||state.type}`);
+    if(state.status) labels.push(`ステータス：${state.status}`);
+    if(state.night) labels.push('深夜従事者のみ');
+    if(state.recheck) labels.push('再検査ありのみ');
+    if(state.unassigned) labels.push('担当者未割当のみ');
+    labels.push(state.retired ? '退職者を含む' : '退職者を除く');
+    if(state.search) labels.push(`検索：「${state.search}」`);
+    document.getElementById('export-base-summary').innerHTML = labels.map(label=>
+      `<span class="rounded-full border border-teal-200 bg-white px-2 py-1">${esc(label)}</span>`).join('');
+  }
+  function renderExportColumns(){
+    const box = document.getElementById('export-columns');
+    box.innerHTML = EXPORT_COLUMNS.map(c=>`
+      <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+        <input type="checkbox" class="hc-export-col rounded text-teal-600 focus:ring-teal-500" value="${esc(c.key)}" ${exportDraft.columns.includes(c.key)?'checked':''}>
+        ${esc(c.label)}
+      </label>`).join('');
+    box.querySelectorAll('.hc-export-col').forEach(cb=>cb.addEventListener('change', ()=>{
+      if(cb.checked){ if(!exportDraft.columns.includes(cb.value)) exportDraft.columns.push(cb.value); }
+      else { exportDraft.columns = exportDraft.columns.filter(k=>k!==cb.value); }
+      document.getElementById('export-modal-error').textContent = '';
+    }));
+  }
+  function selectAllExportColumns(on){
+    if(!exportDraft) return;
+    exportDraft.columns = on ? EXPORT_COLUMNS.map(c=>c.key) : [];
+    renderExportColumns();
+  }
+  function useVisibleExportColumns(){
+    if(!exportDraft) return;
+    const visible = visibleColumns.filter(k=>EXPORT_COLUMN_MAP[k]);
+    if(!visible.length){
+      document.getElementById('export-modal-error').textContent = '現在の表示項目にはCSV出力できる項目がありません';
+      return;
+    }
+    exportDraft.columns = visible;
+    renderExportColumns();
+  }
+  function defaultExportFilter(fieldKey){
+    const field = EXPORT_FILTER_MAP[fieldKey] || EXPORT_FILTER_FIELDS[0];
+    const operator = EXPORT_OPERATORS[field.kind][0][0];
+    const value = field.kind==='enum' ? field.values[0][0] : '';
+    return {field:field.key, operator, value};
+  }
+  function addExportCondition(){
+    if(!exportDraft) return;
+    if(exportDraft.filters.length >= 20){
+      document.getElementById('export-modal-error').textContent = '追加条件は20件まで指定できます';
+      return;
+    }
+    exportDraft.filters.push(defaultExportFilter('status'));
+    renderExportConditions();
+  }
+  function removeExportCondition(index){
+    exportDraft.filters.splice(index,1);
+    renderExportConditions();
+  }
+  function clearExportConditions(){
+    if(!exportDraft) return;
+    exportDraft.filters = [];
+    document.getElementById('export-modal-error').textContent = '';
+    renderExportConditions();
+  }
+  function changeExportCondition(index, part, value){
+    const item = exportDraft && exportDraft.filters[index];
+    if(!item) return;
+    if(part === 'field'){
+      exportDraft.filters[index] = defaultExportFilter(value);
+    } else {
+      item[part] = value;
+      if(part === 'operator' && ['empty','not_empty','is_true','is_false'].includes(value)) item.value = '';
+    }
+    document.getElementById('export-modal-error').textContent = '';
+    renderExportConditions();
+  }
+  function exportValueControl(item, field, index){
+    if(['empty','not_empty','is_true','is_false'].includes(item.operator)){
+      return '<div class="md:col-span-3"></div>';
+    }
+    if(field.kind === 'enum'){
+      const options = field.values.map(([value,label])=>
+        `<option value="${esc(value)}" ${item.value===value?'selected':''}>${esc(label)}</option>`).join('');
+      return `<select aria-label="条件の値" class="hc-input md:col-span-3" onchange="HC.changeExportCondition(${index},'value',this.value)">${options}</select>`;
+    }
+    const type = field.kind === 'date' ? 'date' : 'text';
+    const placeholder = field.kind === 'date' ? '' : '値を入力';
+    return `<input aria-label="条件の値" type="${type}" value="${esc(item.value)}" placeholder="${placeholder}" class="hc-input md:col-span-3" onchange="HC.changeExportCondition(${index},'value',this.value)">`;
+  }
+  function renderExportConditions(){
+    const box = document.getElementById('export-conditions');
+    const empty = document.getElementById('export-conditions-empty');
+    if(!exportDraft.filters.length){
+      box.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    box.innerHTML = exportDraft.filters.map((item,index)=>{
+      const field = EXPORT_FILTER_MAP[item.field] || EXPORT_FILTER_FIELDS[0];
+      const fieldOptions = EXPORT_FILTER_FIELDS.map(f=>
+        `<option value="${esc(f.key)}" ${field.key===f.key?'selected':''}>${esc(f.label)}</option>`).join('');
+      const operators = EXPORT_OPERATORS[field.kind].map(([value,label])=>
+        `<option value="${value}" ${item.operator===value?'selected':''}>${label}</option>`).join('');
+      return `<div class="grid grid-cols-1 md:grid-cols-12 gap-2 items-center rounded-lg border border-gray-100 bg-gray-50/70 p-2.5">
+        <select aria-label="絞り込み項目" class="hc-input md:col-span-4" onchange="HC.changeExportCondition(${index},'field',this.value)">${fieldOptions}</select>
+        <select aria-label="比較方法" class="hc-input md:col-span-4" onchange="HC.changeExportCondition(${index},'operator',this.value)">${operators}</select>
+        ${exportValueControl(item, field, index)}
+        <button type="button" aria-label="条件を削除" class="hc-btn-ghost !px-2 md:col-span-1" onclick="HC.removeExportCondition(${index})">×</button>
+      </div>`;
+    }).join('');
+  }
   function exportCsv(){
-    window.location = '/tools/health_check/api/export?'+buildQuery();
+    if(!exportDraft) return;
+    const error = document.getElementById('export-modal-error');
+    const orderedColumns = EXPORT_COLUMNS.map(c=>c.key).filter(k=>exportDraft.columns.includes(k));
+    if(!orderedColumns.length){ error.textContent = '出力する項目を1つ以上選択してください'; return; }
+    for(const item of exportDraft.filters){
+      const needsValue = !['empty','not_empty','is_true','is_false'].includes(item.operator);
+      if(needsValue && !String(item.value||'').trim()){
+        error.textContent = '追加条件の値を入力してください'; return;
+      }
+    }
+    const pref = {
+      columns:orderedColumns,
+      filters:exportDraft.filters.map(item=>({field:item.field, operator:item.operator, value:item.value||''})),
+    };
+    saveExportPref(pref);
+    const params = new URLSearchParams(buildQuery());
+    params.set('export_columns', orderedColumns.join(','));
+    if(pref.filters.length) params.set('export_filters', JSON.stringify(pref.filters));
+    closeExportModal();
+    window.location = '/tools/health_check/api/export?'+params.toString();
   }
 
   // ---- 設定（統合：ToBell連携 / ツール設定 / アクセス権） ----
@@ -1760,9 +2017,9 @@ const HC = (function(){
     const kinds = {};
     row.querySelectorAll('.mail-kind').forEach(cb=>{ kinds[cb.dataset.kind] = cb.checked; cb.disabled = !enabled; });
     try {
-      await api('/tools/health_check/api/admin/mail_notify',
-                {method:'POST', body:JSON.stringify({office_code:code, enabled, kinds})});
-      toast('メール通知の設定を保存しました');
+      const r = await api('/tools/health_check/api/admin/mail_notify',
+                          {method:'POST', body:JSON.stringify({office_code:code, enabled, kinds})});
+      toast(r.warning || 'メール通知の設定を保存しました', r.warning?'warn':undefined);
     } catch(e){ toast(e.message,'error'); loadMailNotify(); }
   }
 
@@ -1775,7 +2032,7 @@ const HC = (function(){
     try {
       const r = await api('/tools/health_check/api/admin/mail_notify/bulk',
                           {method:'POST', body:JSON.stringify({enabled, kinds})});
-      toast(`${(r.applied||[]).length} 営業所に適用しました`);
+      toast(r.warning || `${(r.applied||[]).length} 営業所に適用しました`, r.warning?'warn':undefined);
       loadMailNotify();
     } catch(e){ toast(e.message,'error'); }
   }
@@ -1820,7 +2077,7 @@ const HC = (function(){
       const enabled = document.getElementById('integration-toggle').checked;
       const kinds = {};
       document.querySelectorAll('#notify-kinds [data-kind]').forEach(cb=>{ kinds[cb.dataset.kind] = cb.checked; });
-      try { await api('/tools/health_check/api/integration', {method:'POST', body:JSON.stringify({enabled, kinds})}); toast('連携設定を保存しました'); closeSettingsModal(); }
+      try { const r = await api('/tools/health_check/api/integration', {method:'POST', body:JSON.stringify({enabled, kinds})}); toast(r.warning || '連携設定を保存しました', r.warning?'warn':undefined); closeSettingsModal(); }
       catch(e){ toast(e.message,'error'); }
     }
   }
@@ -1870,7 +2127,9 @@ const HC = (function(){
     openBulkModal, closeBulkModal, runBulkCreate,
     openCarryoverModal, closeCarryoverModal, runCarryover,
     openOfficeScopeModal, closeOfficeScopeModal, selectOfficeScope,
-    resolveManagers, exportCsv,
+    resolveManagers, openExportModal, closeExportModal, exportCsv,
+    selectAllExportColumns, useVisibleExportColumns,
+    addExportCondition, removeExportCondition, clearExportConditions, changeExportCondition,
     openColumnsModal, closeColumnsModal, selectAllColumns, resetColumns, applyColumns,
     openSettingsModal, closeSettingsModal, switchSettingsTab, saveCurrentSettings,
     applyMailBulk, previewMail, sendMailBatch, gotoPage,
