@@ -1,6 +1,7 @@
 import sys
 import json
 import io
+import csv
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -378,6 +379,89 @@ def test_export_honors_status_filter(tmp_path):
     assert len(body) == 2  # ヘッダ + 1件
 
 
+def test_export_customizes_columns_and_applies_additional_conditions(tmp_path):
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100"]})
+    recs = client.get("/tools/health_check/api/records?year=2026").get_json()["records"]
+    client.put(f"/tools/health_check/api/record/{recs[0]['id']}", json={
+        "exam_date": "2026-05-10",
+        "remarks": "定期健診",
+    })
+
+    filters = [
+        {"field": "status", "operator": "equals", "value": "受診済"},
+        {"field": "exam_date", "operator": "on_or_after", "value": "2026-05-01"},
+        {"field": "remarks", "operator": "contains", "value": "定期"},
+    ]
+    response = client.get("/tools/health_check/api/export", query_string={
+        "year": 2026,
+        "export_columns": "employee_name,exam_date,status",
+        "export_filters": json.dumps(filters, ensure_ascii=False),
+    })
+
+    assert response.status_code == 200
+    rows = list(csv.reader(io.StringIO(response.data.decode("utf-8-sig"))))
+    assert rows == [
+        ["社員名", "受診日", "受診ステータス"],
+        ["社員一郎", "2026-05-10", "受診済"],
+    ]
+
+
+def test_export_rejects_unknown_columns_and_filters(tmp_path):
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+
+    bad_columns = client.get(
+        "/tools/health_check/api/export",
+        query_string={"export_columns": "employee_name,password_hash"},
+    )
+    assert bad_columns.status_code == 400
+
+    bad_filter = client.get("/tools/health_check/api/export", query_string={
+        "export_filters": json.dumps([
+            {"field": "created_by", "operator": "contains", "value": "tester"},
+        ]),
+    })
+    assert bad_filter.status_code == 400
+
+
+def test_export_text_condition_treats_like_wildcards_literally(tmp_path):
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100"]})
+    recs = client.get("/tools/health_check/api/records?year=2026").get_json()["records"]
+    client.put(f"/tools/health_check/api/record/{recs[0]['id']}", json={"remarks": "進捗100%"})
+    client.put(f"/tools/health_check/api/record/{recs[1]['id']}", json={"remarks": "進捗確認"})
+
+    response = client.get("/tools/health_check/api/export", query_string={
+        "year": 2026,
+        "export_columns": "employee_name,remarks",
+        "export_filters": json.dumps([
+            {"field": "remarks", "operator": "contains", "value": "%"},
+        ]),
+    })
+    rows = list(csv.reader(io.StringIO(response.data.decode("utf-8-sig"))))
+    assert rows == [["社員名", "備考"], ["社員一郎", "進捗100%"]]
+
+
+def test_export_dialog_keeps_last_options_in_browser_storage(tmp_path):
+    module, app = _build(tmp_path)
+    client = app.test_client()
+
+    response = client.get("/tools/health_check/")
+
+    assert response.status_code == 200
+    page = response.data.decode("utf-8")
+    assert "CSV出力の設定" in page
+    assert "hc_export_options_v1" in page
+    assert "localStorage.setItem(EXPORT_STORAGE_KEY" in page
+    assert "params.set('export_filters'" in page
+
+
 def test_dashboard_scoped_to_office(tmp_path):
     module, app = _build(tmp_path)
     _seed_basic(app)
@@ -738,6 +822,75 @@ def test_integration_api_saves_notify_kinds(tmp_path):
     assert got2["enabled"] is True
     assert got2["kinds"]["reservation"] is False
     assert got2["kinds"]["secondary_exam"] is True  # 指定しない種別はONのまま
+
+
+def test_turning_off_integration_closes_an_already_materialized_task(tmp_path):
+    """前日に作成済みでも、個人設定をOFFにしたら当日push前に閉じる。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        db.session.add(ToBellUserSettings(
+            username="m001", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.commit()
+
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001",
+    }).get_json()["record"]["id"]
+    client.put(f"/tools/health_check/api/record/{rid}", json={
+        "reservation_date": date.today().isoformat(),
+    })
+    with app.app_context():
+        assert ToBellTask.query.filter_by(
+            source_tool="health_check", source_ref_type="reservation", status="todo").count() == 1
+
+    module.current_user = SimpleNamespace(is_authenticated=True, username="m001", name="管理花子")
+    response = client.post("/tools/health_check/api/integration", json={
+        "enabled": False,
+        "kinds": {"reservation": True, "night_second": True, "secondary_exam": True},
+    })
+    assert response.status_code == 200
+    with app.app_context():
+        task = ToBellTask.query.filter_by(
+            source_tool="health_check", source_ref_type="reservation").first()
+        assert task.status == "archived"
+
+
+def test_health_reminder_reaches_due_push_once(tmp_path, monkeypatch):
+    """健診タスクが当日9時にpush対象となり、同じ期日では二重送信しない。"""
+    from datetime import datetime as _dt
+    from app.services.to_bell_hooks import ensure_health_check_reminders
+    from app.services import to_bell_push
+
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        db.session.add(ToBellUserSettings(
+            username="m001", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.commit()
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001",
+    }).get_json()["record"]["id"]
+
+    calls = []
+    monkeypatch.setattr(to_bell_push, "send_push_to_user", lambda user, **kwargs: (
+        calls.append((user, kwargs)) or {"sent": 1, "failed": 0}
+    ))
+    with app.app_context():
+        record = db.session.get(HealthCheckRecord, rid)
+        record.reservation_date = date(2026, 8, 21)
+        db.session.commit()
+        ensure_health_check_reminders(record, now=_dt(2026, 8, 20, 8, 0))
+
+        first = to_bell_push.send_due_task_pushes(now=_dt(2026, 8, 21, 9, 0))
+        second = to_bell_push.send_due_task_pushes(now=_dt(2026, 8, 21, 9, 1))
+
+    assert first["sent"] == 1
+    assert second["sent"] == 0
+    assert len(calls) == 1
+    assert calls[0][0] == "m001"
+    assert "健康診断予約日" in calls[0][1]["title"]
 
 
 def test_recheck_items_structured_storage(tmp_path):

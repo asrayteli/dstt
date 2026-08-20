@@ -199,17 +199,25 @@ def queue_mail(
         scheduled_at=scheduled_at,
         created_by=created_by,
     )
-    db.session.add(message)
     try:
         if commit:
+            db.session.add(message)
             db.session.commit()
         else:
-            db.session.flush()
+            # 呼び出し元の保存トランザクションを壊さないよう、重複キー競合は
+            # セーブポイント内に隔離する。ここで session.rollback() すると、
+            # 健診レコード本体など同時保存中の変更まで消えてしまう。
+            with db.session.begin_nested():
+                db.session.add(message)
+                db.session.flush()
     except IntegrityError:
         # dedupe_key の競合（並列実行）。既存を取り直して返す。
-        db.session.rollback()
+        if commit:
+            db.session.rollback()
         if dedupe_key:
-            return MailMessage.query.filter_by(dedupe_key=dedupe_key).first()
+            existing = MailMessage.query.filter_by(dedupe_key=dedupe_key).first()
+            if existing is not None:
+                return existing
         raise
 
     if send_now:

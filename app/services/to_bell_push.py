@@ -390,9 +390,10 @@ def _run_health_check_sweep_job(app) -> None:
     （gunicorn の複数ワーカー対策は _run_singleton の flock と併用）。
     """
     def _job():
-        from datetime import date as _date
         marker = os.path.join(app.instance_path, "health_check_sweep_last_run")
-        today = _date.today().isoformat()
+        # アプリの運用タイムゾーンで日付を判定する。OSがUTCでも日本時間の
+        # 日付境界で日次実行されるようにする。
+        today = local_now().date().isoformat()
         try:
             with open(marker, "r", encoding="utf-8") as f:
                 if f.read().strip() == today:
@@ -404,6 +405,10 @@ def _run_health_check_sweep_job(app) -> None:
                 from app.services.to_bell_hooks import sweep_health_check_reminders
                 result = sweep_health_check_reminders()
                 logger.info("health_check daily sweep: %s", result)
+                if result.get("failed", 0):
+                    # 失敗を実行済み扱いにせず、次の30分tickで再試行する。
+                    logger.warning("health_check daily sweep will retry: %s", result)
+                    return
             except Exception as exc:  # noqa: BLE001
                 db.session.rollback()
                 logger.warning("health_check daily sweep failed: %s", exc)

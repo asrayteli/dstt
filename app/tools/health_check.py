@@ -47,6 +47,7 @@ from app.access_control import (
 from app.services.to_bell_hooks import (
     ensure_health_check_reminders,
     close_health_check_reminders,
+    resync_health_check_recipient,
     HEALTH_CHECK_DEFAULT_LEAD_DAYS,
 )
 
@@ -791,6 +792,7 @@ def index():
         current_year=current_fiscal_year(),
         global_lead_days=get_global_lead_days(),
         employee_type_options=EMPLOYEE_TYPE_OPTIONS,
+        export_columns=_EXPORT_COLUMNS,
     )
 
 
@@ -1701,6 +1703,146 @@ _EXPORT_COLUMNS = [
 _EXPORT_BOOL_KEYS = {"is_night_worker", "needs_recheck", "is_retired", "is_exempt", "is_kintone"}
 _RECORD_TYPE_LABEL = {"linked": "名簿連携", "pre_hire": "入社前", "internal": "内勤者"}
 
+# CSV の追加絞り込みで利用できる項目。クライアントからモデル属性名を自由に
+# 指定させず、型と演算子をサーバ側の許可リストで固定する。
+_EXPORT_FILTER_FIELDS = {
+    "status": "status",
+    "record_type": "enum",
+    "employee_number": "text",
+    "employee_name": "text",
+    "employee_type": "text",
+    "assignment_site": "text",
+    "manager_name": "text",
+    "medical_institution": "text",
+    "recheck_items": "text",
+    "secondary_result": "text",
+    "remarks": "text",
+    "hire_date": "date",
+    "birth_date": "date",
+    "reservation_date": "date",
+    "exam_date": "date",
+    "exam_date_2": "date",
+    "secondary_recommended_date": "date",
+    "secondary_guide_sent_date": "date",
+    "secondary_exam_date": "date",
+    "nasva_reservation_date": "date",
+    "nasva_exam_date": "date",
+    "is_night_worker": "bool",
+    "needs_recheck": "bool",
+    "is_exempt": "bool",
+    "is_kintone": "bool",
+    "is_retired": "bool",
+}
+_EXPORT_TEXT_OPERATORS = {"contains", "not_contains", "equals", "not_equals", "empty", "not_empty"}
+_EXPORT_DATE_OPERATORS = {"on", "before", "after", "on_or_before", "on_or_after", "empty", "not_empty"}
+_EXPORT_ENUM_OPERATORS = {"equals", "not_equals"}
+_EXPORT_BOOL_OPERATORS = {"is_true", "is_false"}
+_EXPORT_STATUS_VALUES = {"未予約", "予約済", "受診済", "再検査対象", "二次案内済", "二次完了"}
+
+
+def _parse_export_filters():
+    """追加のCSV絞り込み条件を検証し、正規化した配列を返す。"""
+    raw = request.args.get("export_filters", "").strip()
+    if not raw:
+        return [], None
+    try:
+        filters = json.loads(raw)
+    except (TypeError, ValueError):
+        return None, "CSV出力条件の形式が不正です"
+    if not isinstance(filters, list) or len(filters) > 20:
+        return None, "CSV出力条件は20件以内で指定してください"
+
+    normalized = []
+    for item in filters:
+        if not isinstance(item, dict):
+            return None, "CSV出力条件の形式が不正です"
+        field = str(item.get("field", "")).strip()
+        operator = str(item.get("operator", "")).strip()
+        kind = _EXPORT_FILTER_FIELDS.get(field)
+        allowed = {
+            "text": _EXPORT_TEXT_OPERATORS,
+            "date": _EXPORT_DATE_OPERATORS,
+            "enum": _EXPORT_ENUM_OPERATORS,
+            "bool": _EXPORT_BOOL_OPERATORS,
+            "status": _EXPORT_ENUM_OPERATORS,
+        }.get(kind, set())
+        if not kind or operator not in allowed:
+            return None, "CSV出力条件に利用できない項目または比較方法があります"
+
+        value = str(item.get("value", "")).strip()
+        needs_value = operator not in {"empty", "not_empty", "is_true", "is_false"}
+        if needs_value and not value:
+            return None, "CSV出力条件の値を入力してください"
+        if kind == "date" and needs_value:
+            try:
+                value = date.fromisoformat(value).isoformat()
+            except ValueError:
+                return None, "CSV出力条件の日付が不正です"
+        if kind == "status" and value not in _EXPORT_STATUS_VALUES:
+            return None, "CSV出力条件のステータスが不正です"
+        if kind == "enum" and field == "record_type" and value not in _RECORD_TYPE_LABEL:
+            return None, "CSV出力条件の区分が不正です"
+        normalized.append({"field": field, "operator": operator, "value": value, "kind": kind})
+    return normalized, None
+
+
+def _apply_export_query_filters(query, filters):
+    """DB列で評価できるCSV追加条件を適用する。ステータスは取得後に評価する。"""
+    for item in filters:
+        if item["kind"] == "status":
+            continue
+        column = getattr(HealthCheckRecord, item["field"])
+        operator = item["operator"]
+        value = item["value"]
+        if operator == "empty":
+            query = query.filter(
+                column.is_(None) if item["kind"] == "date"
+                else db.or_(column.is_(None), column == "")
+            )
+        elif operator == "not_empty":
+            query = query.filter(
+                column.isnot(None) if item["kind"] == "date"
+                else db.and_(column.isnot(None), column != "")
+            )
+        elif item["kind"] == "bool":
+            query = query.filter(column.is_(operator == "is_true"))
+        elif item["kind"] == "date":
+            parsed = date.fromisoformat(value)
+            comparisons = {
+                "on": column == parsed,
+                "before": column < parsed,
+                "after": column > parsed,
+                "on_or_before": column <= parsed,
+                "on_or_after": column >= parsed,
+            }
+            query = query.filter(comparisons[operator])
+        elif operator == "contains":
+            escaped = value.replace("/", "//").replace("%", "/%").replace("_", "/_")
+            query = query.filter(column.ilike(f"%{escaped}%", escape="/"))
+        elif operator == "not_contains":
+            escaped = value.replace("/", "//").replace("%", "/%").replace("_", "/_")
+            query = query.filter(db.or_(
+                column.is_(None),
+                ~column.ilike(f"%{escaped}%", escape="/"),
+            ))
+        elif operator == "equals":
+            query = query.filter(column == value)
+        elif operator == "not_equals":
+            query = query.filter(db.or_(column.is_(None), column != value))
+    return query
+
+
+def _matches_export_status_filters(record, filters) -> bool:
+    status = record.compute_status()
+    for item in filters:
+        if item["kind"] != "status":
+            continue
+        if item["operator"] == "equals" and status != item["value"]:
+            return False
+        if item["operator"] == "not_equals" and status == item["value"]:
+            return False
+    return True
+
 
 def _csv_safe(value) -> str:
     """Excel の数式インジェクション対策。
@@ -1724,20 +1866,43 @@ def api_export():
     query, error = _scoped_query(user_id)
     if error:
         return error
-    records = query.order_by(HealthCheckRecord.employee_number).all()
+
+    export_filters, filter_error = _parse_export_filters()
+    if filter_error:
+        return jsonify({"error": filter_error}), 400
+    query = _apply_export_query_filters(query, export_filters)
+
+    sort_by = request.args.get("sort_by", "employee_number")
+    sort_order = request.args.get("sort_order", "asc")
+    if sort_by not in SORTABLE_FIELDS:
+        sort_by = "employee_number"
+    sort_column = getattr(HealthCheckRecord, sort_by)
+    query = query.order_by(sort_column.desc() if sort_order == "desc" else sort_column.asc())
+
+    records = query.all()
     _sync_record_list(records)
     status_filter = request.args.get("status", "").strip()
     if status_filter:
         records = [r for r in records if r.compute_status() == status_filter]
+    records = [r for r in records if _matches_export_status_filters(r, export_filters)]
     year = request.args.get("year", type=int)
+
+    selected_columns = _EXPORT_COLUMNS
+    raw_columns = request.args.get("export_columns", "").strip()
+    if raw_columns:
+        allowed_columns = dict(_EXPORT_COLUMNS)
+        selected_keys = list(dict.fromkeys(k.strip() for k in raw_columns.split(",") if k.strip()))
+        if not selected_keys or any(key not in allowed_columns for key in selected_keys):
+            return jsonify({"error": "CSV出力項目が不正です"}), 400
+        selected_columns = [(key, allowed_columns[key]) for key in selected_keys]
 
     buffer = StringIO()
     writer = csv.writer(buffer)
-    writer.writerow([label for _, label in _EXPORT_COLUMNS])
+    writer.writerow([label for _, label in selected_columns])
     for record in records:
         data = record.to_dict()
         row = []
-        for key, _ in _EXPORT_COLUMNS:
+        for key, _ in selected_columns:
             if key == "record_type":
                 row.append(_RECORD_TYPE_LABEL.get(record.record_type, record.record_type))
             elif key in _EXPORT_BOOL_KEYS:
@@ -1802,10 +1967,14 @@ def api_integration():
         result = update_integrations(user_id, {"integrations": {"health_check.linkage": enabled}})
         kinds = payload.get("kinds")
         notify = set_health_check_notify(user_id, kinds) if isinstance(kinds, dict) else get_health_check_notify(user_id)
+        # 前日に作成済みのタスクも、個人のON/OFF変更へ即時追従させる。
+        sync_result = resync_health_check_recipient(user_id)
         return jsonify({
             "success": True,
             "enabled": result["integrations"].get("health_check.linkage", False),
             "kinds": notify,
+            "warning": ("作成済み通知への反映に失敗しました。日次同期で再試行します。"
+                        if sync_result.get("failed") else None),
         })
     settings = get_settings(user_id)
     return jsonify({
@@ -1913,6 +2082,43 @@ def _save_mail_notify(office_codes: list[str], enabled: bool, kinds: dict) -> li
     return applied
 
 
+def _resync_records_for_mail_offices(office_codes: list[str]) -> int:
+    """本人メール設定の変更を、その営業所の未送信キューへ即時反映する。"""
+    codes = {str(code).strip() for code in office_codes if str(code).strip()}
+    if not codes:
+        return 0
+    try:
+        records = HealthCheckRecord.query.outerjoin(
+            Employee, HealthCheckRecord.employee_id == Employee.id
+        ).filter(db.or_(
+            db.and_(
+                HealthCheckRecord.record_type == "linked",
+                HealthCheckRecord.employee_id.isnot(None),
+                Employee.id.isnot(None),
+                Employee.office_code.in_(codes),
+            ),
+            db.and_(
+                db.or_(
+                    HealthCheckRecord.record_type != "linked",
+                    HealthCheckRecord.employee_id.is_(None),
+                    Employee.id.is_(None),
+                ),
+                HealthCheckRecord.office_code.in_(codes),
+            ),
+        )).all()
+        failed = 0
+        for record in records:
+            if not ensure_health_check_reminders(
+                record, global_lead_days=get_global_lead_days(), commit=False
+            ):
+                failed += 1
+        db.session.commit()
+        return failed
+    except Exception:
+        db.session.rollback()
+        return 1
+
+
 @health_check_bp.route("/api/admin/mail_notify", methods=["GET", "POST"])
 @login_required
 def api_admin_mail_notify():
@@ -1934,11 +2140,14 @@ def api_admin_mail_notify():
             return jsonify({"error": "この営業所を管理する権限がありません"}), 403
         applied = _save_mail_notify(
             [office_code], bool(payload.get("enabled")), payload.get("kinds") or {})
+        sync_failed = _resync_records_for_mail_offices(applied)
         record_history(None, user_id, "mail_notify", office_code, None,
                        json.dumps(get_office_mail_notify(office_code), ensure_ascii=False))
         db.session.commit()
         return jsonify({"success": True, "office_code": applied[0],
-                        "setting": get_office_mail_notify(office_code)})
+                        "setting": get_office_mail_notify(office_code),
+                        "warning": ("既存の送信予定への反映に失敗しました。日次同期で再試行します。"
+                                    if sync_failed else None)})
 
     result = []
     for o in _office_options():
@@ -1967,11 +2176,14 @@ def api_admin_mail_notify_bulk():
         return jsonify({"error": "対象営業所がありません"}), 403
 
     applied = _save_mail_notify(targets, bool(payload.get("enabled")), payload.get("kinds") or {})
+    sync_failed = _resync_records_for_mail_offices(applied)
     record_history(None, user_id, "mail_notify_bulk", ",".join(applied), None,
                    json.dumps({"enabled": bool(payload.get("enabled")),
                                "kinds": payload.get("kinds") or {}}, ensure_ascii=False))
     db.session.commit()
-    return jsonify({"success": True, "applied": applied})
+    return jsonify({"success": True, "applied": applied,
+                    "warning": ("一部の既存送信予定への反映に失敗しました。日次同期で再試行します。"
+                                if sync_failed else None)})
 
 
 def _mail_basis_for(record, kind: str):

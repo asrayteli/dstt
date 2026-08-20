@@ -4,8 +4,10 @@ import os
 import sys
 
 import pytest
+from flask import Flask
 
 import app.services.to_bell_push as push
+import app.services.to_bell_hooks as hooks
 
 
 @pytest.fixture()
@@ -58,3 +60,20 @@ def test_run_singleton_without_fcntl_still_runs(fake_app, monkeypatch):
     calls = []
     push._run_singleton(fake_app, "job.lock", lambda: calls.append(1))
     assert calls == [1]
+
+
+def test_health_sweep_marker_is_written_only_after_a_success(tmp_path, monkeypatch):
+    """同期に失敗した日は実行済みにせず、次のtickで再試行できる。"""
+    app = Flask(__name__, instance_path=str(tmp_path / "instance"))
+    marker = tmp_path / "instance" / "health_check_sweep_last_run"
+
+    monkeypatch.setattr(
+        hooks, "sweep_health_check_reminders", lambda: {"processed": 4, "failed": 1})
+    push._run_health_check_sweep_job(app)
+    assert not marker.exists()
+
+    monkeypatch.setattr(
+        hooks, "sweep_health_check_reminders", lambda: {"processed": 4, "failed": 0})
+    push._run_health_check_sweep_job(app)
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8").strip() == push.local_now().date().isoformat()

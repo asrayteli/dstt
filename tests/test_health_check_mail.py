@@ -8,7 +8,7 @@ import sys
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from flask import Flask
 
@@ -20,6 +20,7 @@ from app.models import (
     db, Office, Employee, User, AccessBranch, AccessOffice,
     HealthCheckRecord, MailMessage, ToBellUserSettings,
 )
+from app.services import mail_service
 
 
 def _load_module():
@@ -120,6 +121,7 @@ def test_mail_is_queued_when_office_is_enabled(tmp_path):
         assert m.to_address == "shain@example.co.jp"
         assert m.category == "health_check"
         assert "二次検査" in m.subject
+        assert m.scheduled_at == datetime.combine(date.today(), time(9, 0))
 
 
 def test_disabled_kind_is_not_sent(tmp_path):
@@ -197,6 +199,55 @@ def test_same_date_is_not_sent_twice(tmp_path):
                json={"secondary_recommended_date": (today - timedelta(days=1)).isoformat()})
     with app.app_context():
         assert MailMessage.query.count() == 2
+        rows = MailMessage.query.order_by(MailMessage.created_at).all()
+        assert rows[0].status == "canceled"
+        assert rows[1].status == "queued"
+
+
+def test_automatic_mail_waits_until_target_day_nine(tmp_path, monkeypatch):
+    """前日にキューへ積んでも、本人への実送信は対象日9:00まで待つ。"""
+    module, app = _build(tmp_path)
+    _seed(app)
+    client = app.test_client()
+    _enable_mail(client)
+    target = date.today()
+    _make_record(client, recheck_date=target.isoformat())
+
+    app.config["MAIL_HOST"] = "smtp.example.com"
+    app.config["MAIL_FROM"] = "noreply@example.com"
+    monkeypatch.setattr(mail_service, "_send_smtp", lambda message, settings: None)
+    with app.app_context():
+        before = mail_service.dispatch_pending(now=datetime.combine(target, time(8, 59)))
+        assert before["selected"] == 0
+        assert MailMessage.query.first().status == "queued"
+
+        at_nine = mail_service.dispatch_pending(now=datetime.combine(target, time(9, 0)))
+        assert at_nine["sent"] == 1
+        assert MailMessage.query.first().status == "sent"
+
+
+def test_completion_and_mail_setting_off_cancel_pending_mail(tmp_path):
+    module, app = _build(tmp_path)
+    _seed(app)
+    client = app.test_client()
+    _enable_mail(client)
+    rid = _make_record(client, recheck_date=date.today().isoformat())
+
+    # 受診完了を保存した時点で、まだ送っていない自動メールは取り消す。
+    client.put(f"/tools/health_check/api/record/{rid}",
+               json={"secondary_exam_date": date.today().isoformat()})
+    with app.app_context():
+        assert MailMessage.query.first().status == "canceled"
+
+    # 再度対象にしてキューへ積んだ後、営業所設定をOFFにしても即時に取り消す。
+    client.put(f"/tools/health_check/api/record/{rid}", json={"secondary_exam_date": ""})
+    with app.app_context():
+        assert MailMessage.query.first().status == "queued"
+    client.post("/tools/health_check/api/admin/mail_notify", json={
+        "office_code": "100", "enabled": False, "kinds": {},
+    })
+    with app.app_context():
+        assert MailMessage.query.first().status == "canceled"
 
 
 # ============================================================
