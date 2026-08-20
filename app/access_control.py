@@ -240,13 +240,33 @@ def _user_satisfies_group_rule(
     return True
 
 
+def _group_tool_rules() -> list:
+    """グループ付与ルール一覧。リクエスト内で使い回す。
+
+    ``enabled_users()`` のように多人数ぶんの権限をまとめて判定する経路では、
+    人数ぶんだけ全件スキャンが走ってしまうため、リクエスト境界でメモ化する。
+    """
+    try:
+        from flask import g, has_app_context
+
+        if not has_app_context():
+            return GroupToolPermission.query.all()
+        rules = getattr(g, "_dstt_group_tool_rules", None)
+        if rules is None:
+            rules = GroupToolPermission.query.all()
+            g._dstt_group_tool_rules = rules
+        return rules
+    except Exception:  # noqa: BLE001
+        return GroupToolPermission.query.all()
+
+
 def _group_granted_tool_keys(user) -> set[str]:
     if user is None or not getattr(user, "is_authenticated", False):
         return set()
     branch_ids = user_branch_ids(user)
     office_ids = user_office_ids(user)
     dept_ids = user_department_ids(user)
-    rules = GroupToolPermission.query.all()
+    rules = _group_tool_rules()
     keys: set[str] = set()
     for rule in rules:
         if _user_satisfies_group_rule(user, rule, branch_ids, office_ids, dept_ids):
@@ -291,6 +311,49 @@ def username_has_tool_access(username: str, tool_key: str) -> bool:
     # user_has_tool_access は is_authenticated を見るため、DB から引いた User でも
     # 判定できるよう UserMixin の既定値（True）に頼る。
     return user_has_tool_access(tool_key, user)
+
+
+def usernames_with_tool_access(usernames, tool_key: str) -> set[str]:
+    """複数ユーザーのツールアクセス権をまとめて判定する。
+
+    1人ずつ ``username_has_tool_access()`` を呼ぶと、User の取得・個別付与の照会・
+    グループ規則の評価が人数ぶん走る（連携の一斉通知では保存リクエストの中で
+    数十〜数百クエリになる）。ツール単位の判定は1回で済ませ、個別付与は
+    まとめて引き、グループ規則は必要な人にだけ評価する。
+    """
+    names = {str(name).strip() for name in usernames if str(name or "").strip()}
+    if not names:
+        return set()
+    users = User.query.filter(User.username.in_(names)).all()
+    if not users:
+        return set()
+
+    admins = {user.username for user in users if is_admin_user(user)}
+    # 以降はツール単位の判定。人数に関係なく1回だけ行う。
+    if not _is_tool_visible(tool_key):
+        return admins
+    if not tool_requires_permission(tool_key):
+        return {user.username for user in users}
+
+    allowed = set(admins)
+    undecided = [user for user in users if user.username not in allowed]
+    if undecided:
+        granted_user_ids = {
+            row.user_id
+            for row in UserToolPermission.query.filter(
+                UserToolPermission.tool_key == tool_key,
+                UserToolPermission.user_id.in_([user.id for user in undecided]),
+            ).all()
+        }
+        allowed.update(user.username for user in undecided if user.id in granted_user_ids)
+        undecided = [user for user in undecided if user.username not in allowed]
+
+    # グループ付与にこのツールの規則が無ければ、所属の解決自体が不要。
+    if undecided and any(rule.tool_key == tool_key for rule in _group_tool_rules()):
+        for user in undecided:
+            if tool_key in _group_granted_tool_keys(user):
+                allowed.add(user.username)
+    return allowed
 
 
 def _tool_visibility_map() -> dict[str, bool]:

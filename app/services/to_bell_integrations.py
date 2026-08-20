@@ -241,15 +241,26 @@ def enabled_users(integration_key: str) -> list[str]:
     if integration_key not in INTEGRATION_KEYS:
         return []
     rows = ToBellUserSettings.query.all()
-    result: list[str] = []
-    for row in rows:
-        integrations = row.integrations if isinstance(row.integrations, dict) else {}
-        if not integrations.get(integration_key):
-            continue
-        if not has_tool_access(row.username, integration_key):
-            continue
-        result.append(row.username)
-    return result
+    candidates = [
+        row.username
+        for row in rows
+        if (row.integrations if isinstance(row.integrations, dict) else {}).get(integration_key)
+    ]
+    if not candidates:
+        return []
+    tool_key = INTEGRATION_TOOL_REQUIREMENTS.get(integration_key)
+    if tool_key is None:
+        return candidates
+    # アクセス権判定はユーザーごとに所属・付与を引くため、対象者を一度にまとめて解決する
+    # （1人ずつ判定すると、CloudShift の一斉通知が人数ぶんの全件スキャンを伴う）。
+    from app.access_control import usernames_with_tool_access
+
+    allowed = usernames_with_tool_access(candidates, tool_key)
+    cache = _tool_access_cache()
+    if cache is not None:
+        for username in candidates:
+            cache[(username, tool_key)] = username in allowed
+    return [username for username in candidates if username in allowed]
 
 
 # 健診PLUSの通知種別（source_ref_type と一致）。

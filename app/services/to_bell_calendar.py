@@ -416,14 +416,19 @@ def on_task_deleted(task: ToBellTask) -> None:
     """
     if not task.gcal_event_id or not task.gcal_synced_by:
         return
+    account = get_account(task.gcal_synced_by)
+    if account is None or not account.refresh_token:
+        # 接続が切れている。予定はカレンダーに残っているので参照も残し、
+        # 再接続後に外せるようにする（消せていないのに参照だけ捨てると、
+        # ToBell から手が届かない予定がカレンダーに取り残される）。
+        return
     try:
-        account = get_account(task.gcal_synced_by)
-        if account is not None and account.refresh_token:
-            _delete_event(task, account)
+        _delete_event(task, account)
     except Exception:  # noqa: BLE001
         logger.warning("ToBell→Calendar の削除同期に失敗しました", exc_info=True)
-    finally:
-        _clear_calendar_link(task)
+        return  # 消せていないので参照は残す
+    # 予定を消せた（または既に無かった）ときだけ参照を外す。
+    _clear_calendar_link(task)
 
 
 def _clear_calendar_link(task: ToBellTask) -> None:

@@ -69,6 +69,26 @@ _TB_SUFFIX_RE = re.compile(r"TB$", re.IGNORECASE)
 _TB_STRIP_RE = re.compile(r"\s*TB\s*$", re.IGNORECASE)
 
 
+def _strip_tb_marker(summary_text: str) -> str:
+    """予定名の末尾から「TB」マーカーだけを取り除く。
+
+    空白を挟まずに英数字と続いているときは語の一部とみなして残す。そうしないと
+    "定例MTB" のような予定名が "定例M" に化ける（取り込み済みタスクは次回同期で
+    改名されてしまう）。空白で区切られていれば "Invoice TB" もマーカーとして扱う。
+    """
+    match = _TB_STRIP_RE.search(summary_text)
+    if match is None:
+        return summary_text
+    matched = match.group(0)
+    tb_start = match.start() + len(matched) - len(matched.lstrip())
+    if tb_start == match.start() and tb_start > 0:
+        # 直前の文字と地続き。英数字なら語の一部（"MTB" など）。
+        before = summary_text[tb_start - 1]
+        if before.isascii() and before.isalnum():
+            return summary_text
+    return summary_text[: match.start()].strip() or summary_text
+
+
 class _SyncTokenExpired(RuntimeError):
     """syncToken が失効（HTTP 410）。フル再同期が必要。"""
 
@@ -302,8 +322,7 @@ def _title_for(event: dict[str, Any], mode: str, summary_text: str) -> str:
     モードによって付けたり外したりすると、取り込む範囲を変えた瞬間に既存タスクの
     名前が「請求」→「請求 TB」と書き換わってしまう。
     """
-    stripped = _TB_STRIP_RE.sub("", summary_text).strip()
-    title = (stripped or summary_text).strip()
+    title = _strip_tb_marker(summary_text).strip()
     return (title or "(無題の予定)")[:240]
 
 

@@ -10,6 +10,8 @@
     calMonth: startOfMonth(new Date()),
     isPwa: document.body.classList.contains("tobell-pwa-mode"),
     currentUser: (document.querySelector("[data-tb-user]") || {}).dataset?.tbUser || "",
+    // 共有リンク（ログイン不要）で開いているか。サーバー側で拒否される操作は出さない。
+    isShare: ((document.querySelector("[data-tb-share]") || {}).dataset?.tbShare || "0") === "1",
     swRegistration: null,
     foregroundTimer: 0,
   };
@@ -592,14 +594,18 @@
   function taskMenuItems(taskId) {
     const task = state.tasks.find((item) => item.id === taskId);
     const done = task && task.status === "done";
-    return [
+    const items = [
       { label: "開く", action: () => openTaskById(taskId) },
       {
         label: done ? "↩ 未完了に戻す" : "✓ 完了にする",
         action: () => toggleTaskComplete(taskId, !done),
       },
-      { label: "🗑 タスクを削除", danger: true, action: () => deleteTaskById(taskId) },
     ];
+    // 完全削除は共有リンクからは行えない（サーバー側で 403）。押せる形で出さない。
+    if (!state.isShare) {
+      items.push({ label: "🗑 タスクを削除", danger: true, action: () => deleteTaskById(taskId) });
+    }
+    return items;
   }
 
   function projectMenuItems(projectId) {
@@ -1470,6 +1476,10 @@
       return; // 連携OFF・権限なし・共有セッションでは 403/400。何も足さない。
     }
     if (!files.length || state.selectedTaskId !== taskId) return;
+    // 直接添付が0件のときは「添付はありません。」が出ている。FILEPOST 側にファイルが
+    // あるなら、その空表示は取り除く（「ありません」と一覧が並ぶのはおかしい）。
+    const empty = container.querySelector(".tobell-empty");
+    if (empty) empty.remove();
     const wrap = document.createElement("div");
     wrap.className = "tobell-attachment-external";
     wrap.innerHTML = files.map((row) => `
@@ -1987,7 +1997,8 @@
       await refreshNotifyToggle();
       // プッシュ購読済みならサーバーが通知するので前面監視は不要。
       // 購読がない（権限だけ付与済み等）場合のフォールバックとして動かす。
-      if ($("tb-enable-push-notify") && $("tb-enable-push-notify").dataset.state !== "on") {
+      const pushToggle = $("tb-enable-push-notify");
+      if (!pushToggle || pushToggle.dataset.state !== "on") {
         startForegroundWatch();
       }
     });
@@ -2794,10 +2805,16 @@
       if (created || updated) {
         state.filter = "integrations";
         state.view = "list";
+        // 取り込んだ予定はプロジェクトに属さない。絞り込みを残したままだと
+        // 「新規N件」と出た直後に空の一覧が表示されてしまう。
+        state.projectFilter = 0;
+        state.selectedTaskId = 0;
+        closeDetail();
         document.querySelectorAll(".tobell-filter").forEach((item) => {
           item.classList.toggle("is-active", item.dataset.filter === "integrations");
         });
         syncViewButtons();
+        renderProjects();
         const settings = $("tb-settings-modal");
         if (settings) settings.setAttribute("hidden", "");
       }
@@ -3197,7 +3214,10 @@
   }
 
   function isOverdue(task) {
-    return task.due_at && task.status !== "done" && new Date(task.due_at).getTime() < Date.now();
+    // 期日を指定せずに追加したタスクへ自動で入れた日付（due_auto）は締切ではないので、
+    // 期限切れ扱い（赤バッジ）にしない。サーバー側の「期限切れ」フィルタと同じ基準。
+    if (!task.due_at || task.status === "done" || task.due_auto) return false;
+    return new Date(task.due_at).getTime() < Date.now();
   }
 
   // 終日タスク（時刻未指定）は 23:59:59 として保存される。表示では時刻を出さない。
@@ -3220,7 +3240,9 @@
 
   function taskDueText(task) {
     if (!task.due_at) return "期日なし";
-    return formatDue(task.due_at, task.due_all_day);
+    const text = formatDue(task.due_at, task.due_all_day);
+    // 自動で入った日付は締切ではないことを明示する（期限切れにもならない）。
+    return task.due_auto ? `${text}（自動）` : text;
   }
 
   function formatDueShort(value, allDay) {

@@ -25,6 +25,7 @@ from app.models import (
     ToBellTag,
     ToBellTask,
     ToBellTemplate,
+    ToBellUserSettings,
     User,
     db,
 )
@@ -154,13 +155,17 @@ def _resolve_due_at_raw(payload: dict[str, Any]) -> datetime | None:
     return parse_datetime(due_date, "due_date")
 
 
-def resolve_due_at_for_new_task(payload: dict[str, Any]) -> datetime:
-    """新規タスクの期日。未指定なら「追加した日の終日」にする。
+def resolve_due_at_for_new_task(payload: dict[str, Any]) -> tuple[datetime, bool]:
+    """新規タスクの期日と「自動で付けたか」を返す。
 
-    期日なしタスクはカレンダー／期限ビューに一切現れないため、既定で当日に置く。
-    あとから詳細パネルで期日を消せば、従来どおり受信箱（期日なし）へ移せる。
+    期日なしタスクはカレンダー／期限ビューに一切現れないため、未指定なら
+    「追加した日の終日」を入れる。ただしそれは利用者が決めた締切ではないので
+    ``due_auto=True`` の印を付け、「期限切れ」の判定からは外す。
     """
-    return resolve_due_at(payload) or default_due_at()
+    resolved = resolve_due_at(payload)
+    if resolved is not None:
+        return resolved, False
+    return default_due_at(), True
 
 
 def visible_task_filter(username: str):
@@ -245,12 +250,21 @@ def list_tasks(
         # アーカイブしたタスクの置き場（「戻す」で復帰できるようにするため）。
         query = query.filter(ToBellTask.status == "archived")
     elif filter_name == "inbox":
-        query = query.filter(ToBellTask.due_at.is_(None), ToBellTask.status.in_(["todo", "doing", "blocked", "review", "returned"]))
+        # 「受信箱」は完了・アーカイブ以外のすべてのタスク置き場。
+        # 期日を指定せず追加したタスクにも日付が入るようになったため、
+        # 「期日なし」を条件にすると常に空になってしまう。
+        query = query.filter(ToBellTask.status.notin_(["done", "archived"]))
     elif filter_name == "assigned":
         query = query.filter(ToBellTask.assigned_to == username, ToBellTask.status.notin_(["done", "archived"]))
     elif filter_name == "overdue":
         # 「期限切れ」は現在時刻を過ぎたもの。終日タスク(23:59:59)は当日中は期限切れにしない。
-        query = query.filter(ToBellTask.due_at < now, ToBellTask.status.notin_(["done", "archived"]))
+        # 期日を指定せずに追加したタスクへ自動で入れた日付（due_auto）は、利用者が決めた
+        # 締切ではないので数えない。触って期日を変えた時点で対象になる。
+        query = query.filter(
+            ToBellTask.due_at < now,
+            ToBellTask.due_auto.is_(False),
+            ToBellTask.status.notin_(["done", "archived"]),
+        )
     elif filter_name == "done":
         query = query.filter(ToBellTask.status == "done")
     elif filter_name == "attention":
@@ -314,13 +328,16 @@ def create_task(username: str, payload: dict[str, Any], *, allow_source: bool = 
     assigned_to = _coerce_same_office_user(username, payload.get("assigned_to") or username, "assigned_to")
     reviewer_id = _coerce_same_office_user(username, payload.get("reviewer_id"), "reviewer_id")
 
+    due_at, due_is_auto = resolve_due_at_for_new_task(payload)
+
     task = ToBellTask(
         title=title[:MAX_TITLE_LEN],
         description=str(payload.get("description") or "").strip(),
         status=status,
         priority=priority,
         # 期日未指定なら「追加した日の終日」。カレンダーに必ず並ぶようにするため。
-        due_at=resolve_due_at_for_new_task(payload),
+        due_at=due_at,
+        due_auto=due_is_auto,
         start_at=parse_datetime(payload.get("start_at"), "start_at"),
         created_by=username,
         assigned_to=assigned_to,
@@ -365,7 +382,12 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
     if "priority" in payload:
         task.priority = _choice(payload.get("priority"), VALID_PRIORITIES, task.priority)
     if "due_at" in payload or "due_date" in payload or "due_time" in payload:
+        previous_due_at = task.due_at
         task.due_at = _resolve_due_at_for_update(task, payload)
+        if task.due_at != previous_due_at:
+            # 利用者が期日を触った＝本人が決めた締切。以後は期限切れの対象になる。
+            # 値が変わっていない（詳細を開いてそのまま保存した）場合は印を維持する。
+            task.due_auto = False
     if "start_at" in payload:
         task.start_at = parse_datetime(payload.get("start_at"), "start_at")
     if "assigned_to" in payload:
@@ -645,7 +667,9 @@ def notification_summary(username: str) -> dict[str, Any]:
     todo_count = active_query.filter(ToBellTask.status == "todo").count()
     doing_count = active_query.filter(ToBellTask.status.in_(["doing", "blocked", "review", "returned"])).count()
     urgent_count = active_query.filter(ToBellTask.priority == "urgent").count()
-    overdue_count = active_query.filter(ToBellTask.due_at < now).count()
+    overdue_count = active_query.filter(
+        ToBellTask.due_at < now, ToBellTask.due_auto.is_(False)
+    ).count()
     severity = "danger" if action_count else ("warning" if unread_count else "info")
     badges = []
     if urgent_count:
@@ -704,12 +728,25 @@ def cleanup_expired_records(
     now = now or utc_now()
     cutoff = now - timedelta(days=retention_days)
     integration_cutoff = now - timedelta(days=integration_retention_days)
+    # created_at / completed_at / updated_at はナイーブUTC、due_at は設定タイムゾーンの
+    # ウォールクロック。「まだ先の予定か」を UTC の現在時刻で判定すると、UTCより西の
+    # タイムゾーンでは当日ぶんを未来のまま消してしまう。due_at の比較だけ基準を合わせる。
+    local_reference = local_now() + (now - utc_now())
 
     task_query = ToBellTask.query.filter(
         or_(
             and_(ToBellTask.status == "done", ToBellTask.completed_at.isnot(None), ToBellTask.completed_at <= cutoff),
             and_(ToBellTask.status == "archived", ToBellTask.updated_at <= cutoff),
-            and_(ToBellTask.status.notin_(["done", "archived"]), ToBellTask.due_at.isnot(None), ToBellTask.due_at <= cutoff),
+            # 期日を過ぎたまま放置された未完了タスク。ただし「期日を指定せずに追加したので
+            # 自動で入った日付」は締切ではないので、これを根拠に消してはいけない。
+            # （期日なしタスクは従来ずっと残っていた。既定で日付が入るようになった結果、
+            #   放置したメモが60日で完全削除される、という事故になる）
+            and_(
+                ToBellTask.status.notin_(["done", "archived"]),
+                ToBellTask.due_at.isnot(None),
+                ToBellTask.due_auto.is_(False),
+                ToBellTask.due_at <= cutoff,
+            ),
         )
     )
     # 連携（CloudShift / 健診PLUS / Googleカレンダー）から自動追加されたタスクは、
@@ -723,7 +760,7 @@ def cleanup_expired_records(
         _integration_task_clause(),
         ToBellTask.created_at.isnot(None),
         ToBellTask.created_at <= integration_cutoff,
-        or_(ToBellTask.due_at.is_(None), ToBellTask.due_at <= now),
+        or_(ToBellTask.due_at.is_(None), ToBellTask.due_at <= local_reference),
     )
 
     tasks: dict[int, ToBellTask] = {task.id: task for task in task_query.all()}
@@ -828,21 +865,50 @@ def serialize_task(task: ToBellTask, username: str) -> dict[str, Any]:
 
 # ===== プロジェクト =====
 
+PROJECT_ORDER_PREF_KEY = "project_order"
+
+
+def get_project_order(username: str) -> list[int]:
+    """利用者ごとのプロジェクト並び順（プロジェクトIDの並び）。
+
+    ``sort_order`` は全員で共有するカラムなので、そこに書き込むと一人の並べ替えが
+    同じ営業所の全員の画面を変えてしまう。並び替えは利用者個人の設定として持つ。
+    """
+    row = ToBellUserSettings.query.filter_by(username=username).first()
+    prefs = (row.preferences if row and isinstance(row.preferences, dict) else {}) or {}
+    raw = prefs.get(PROJECT_ORDER_PREF_KEY)
+    if not isinstance(raw, list):
+        return []
+    order: list[int] = []
+    for item in raw:
+        pid = _safe_int(item)
+        if pid and pid not in order:
+            order.append(pid)
+    return order
+
+
+def _project_sort_key(username_order: dict[int, int]):
+    def key(project: ToBellProject):
+        personal = username_order.get(project.id)
+        return (
+            0 if project.pinned else 1,
+            PROJECT_STATUS_ORDER.get(project.status, 9),
+            # 個人の並び順があるものを先に、その並びで。無いものは共有の sort_order で後ろへ。
+            (0, personal) if personal is not None else (1, int(project.sort_order or 0)),
+            (project.name or "").lower(),
+            project.id,
+        )
+
+    return key
+
+
 def list_projects(username: str, *, include_archived: bool = False) -> list[dict[str, Any]]:
     office_id = _user_office_id(username)
     query = ToBellProject.query.filter(_project_visible_filter(username, office_id))
     if not include_archived:
         query = query.filter(ToBellProject.status != "archived")
-    projects = sorted(
-        query.all(),
-        key=lambda p: (
-            0 if p.pinned else 1,
-            PROJECT_STATUS_ORDER.get(p.status, 9),
-            int(p.sort_order or 0),
-            (p.name or "").lower(),
-            p.id,
-        ),
-    )
+    personal_order = {pid: index for index, pid in enumerate(get_project_order(username))}
+    projects = sorted(query.all(), key=_project_sort_key(personal_order))
     project_ids = [project.id for project in projects]
     total_map: dict[int, int] = {}
     open_map: dict[int, int] = {}
@@ -938,31 +1004,39 @@ def update_project(project: ToBellProject, username: str, payload: dict[str, Any
 
 
 def reorder_projects(username: str, ordered_ids: Any) -> int:
-    """利用者が見られるプロジェクトを、与えられた並び順で sort_order に反映する。"""
+    """プロジェクトの並び順を、その利用者個人の設定として保存する。
+
+    以前は共有カラム ``sort_order`` を書き換えていたため、所属内の誰かが並べ替えると
+    他の人の画面の並びまで変わっていた。個人設定に持つことで、作成者でなくても自分の
+    サイドバーを自由に並べ替えられ、かつ他人には影響しない。
+    """
     if not isinstance(ordered_ids, (list, tuple)):
         raise ToBellInputError("ordered_ids", "並び替えるプロジェクトを指定してください。")
     office_id = _user_office_id(username)
-    is_admin = _is_admin(username)
     visible = {
-        p.id: p
+        p.id
         for p in ToBellProject.query.filter(_project_visible_filter(username, office_id)).all()
     }
-    updated = 0
-    for index, raw in enumerate(ordered_ids):
+    order: list[int] = []
+    for raw in ordered_ids:
         pid = _safe_int(raw)
-        project = visible.get(pid) if pid else None
-        if project is None:
-            continue
-        # sort_order は全員で共有するカラムなので、書き換えられるのは作成者だけにする。
-        # （以前は所属内の誰でも並べ替えでき、他人の画面の並びまで変わっていた）
-        if project.owner_id != username and not is_admin:
-            continue
-        if project.sort_order != index:
-            project.sort_order = index
-            updated += 1
-    if updated:
-        db.session.commit()
-    return updated
+        # 見えないプロジェクト・重複は落とす（消えたプロジェクトのIDも溜めない）。
+        if pid and pid in visible and pid not in order:
+            order.append(pid)
+    if not order:
+        raise ToBellInputError("ordered_ids", "並び替えるプロジェクトを指定してください。")
+    if get_project_order(username) == order:
+        return 0
+    row = ToBellUserSettings.query.filter_by(username=username).first()
+    if row is None:
+        row = ToBellUserSettings(username=username, integrations={}, preferences={})
+        db.session.add(row)
+        db.session.flush()
+    prefs = dict(row.preferences or {})
+    prefs[PROJECT_ORDER_PREF_KEY] = order
+    row.preferences = prefs
+    db.session.commit()
+    return len(order)
 
 
 def notify_project(project: ToBellProject, actor: str, payload: dict[str, Any]) -> int:
@@ -1240,15 +1314,18 @@ def instantiate_template(template: ToBellTemplate, username: str, payload: dict[
         due_at = resolve_due_at(payload)
     elif tpl.get("due_in_days") is not None:
         due_at = end_of_day(local_today() + timedelta(days=int(tpl.get("due_in_days") or 0)))
+    due_is_auto = False
     if due_at is None:
-        # 新規タスクと同じ既定（追加した日の終日）にそろえる。
+        # 新規タスクと同じ既定（追加した日の終日／期限切れには数えない）にそろえる。
         due_at = default_due_at()
+        due_is_auto = True
     task = ToBellTask(
         title=title[:MAX_TITLE_LEN],
         description=str(tpl.get("description") or "").strip(),
         status="todo",
         priority=_choice(tpl.get("priority"), VALID_PRIORITIES, "normal"),
         due_at=due_at,
+        due_auto=due_is_auto,
         created_by=username,
         assigned_to=_coerce_same_office_user(username, payload.get("assigned_to") or username, "assigned_to"),
         project_id=_coerce_project(username, payload.get("project_id")),

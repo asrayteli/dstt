@@ -105,6 +105,109 @@ def test_task_without_due_date_becomes_all_day_task_for_today(app_ctx):
     assert created["id"] in [task["id"] for task in calendar]
 
 
+def test_auto_assigned_due_date_never_counts_as_overdue(app_ctx):
+    """自動で入った日付は締切ではないので、翌日以降も「期限切れ」に数えない。"""
+    from datetime import timedelta as _td
+
+    from app.models import ToBellTask, db
+
+    _user(app_ctx, "alice")
+    client = _client(app_ctx, "alice")
+    auto = client.post("/tools/to_bell/api/tasks", json={"title": "期日を決めずに追加"}).get_json()
+    assert auto["due_auto"] is True
+
+    # 昨日追加した扱いにする（＝自動で入った日付は昨日）。
+    with app_ctx.app_context():
+        task = db.session.get(ToBellTask, auto["id"])
+        task.due_at = task.due_at - _td(days=1)
+        db.session.commit()
+
+    overdue = client.get("/tools/to_bell/api/tasks?filter=overdue").get_json()
+    assert overdue["tasks"] == []
+    assert all(badge["label"] != "期限切れ1件" for badge in overdue["summary"]["badges"])
+
+
+def test_touching_the_due_date_makes_it_a_real_deadline(app_ctx):
+    """利用者が期日を変えたら、以後は通常どおり期限切れの対象になる。"""
+    from app.models import ToBellTask, db
+    from app.services.local_time import local_now
+    from datetime import timedelta as _td
+
+    _user(app_ctx, "alice")
+    client = _client(app_ctx, "alice")
+    task = client.post("/tools/to_bell/api/tasks", json={"title": "あとで期日を決める"}).get_json()
+    assert task["due_auto"] is True
+
+    yesterday = (local_now() - _td(days=1)).date().isoformat()
+    updated = client.put(
+        f"/tools/to_bell/api/tasks/{task['id']}",
+        json={"due_date": yesterday, "due_time": "09:00"},
+    ).get_json()
+    assert updated["due_auto"] is False
+
+    overdue = client.get("/tools/to_bell/api/tasks?filter=overdue").get_json()["tasks"]
+    assert [row["id"] for row in overdue] == [task["id"]]
+
+    with app_ctx.app_context():
+        assert db.session.get(ToBellTask, task["id"]).due_auto is False
+
+
+def test_unchanged_detail_save_keeps_the_auto_marker(app_ctx):
+    """詳細を開いてそのまま保存しても「自動で入った日付」の印は落とさない。"""
+    _user(app_ctx, "alice")
+    client = _client(app_ctx, "alice")
+    task = client.post("/tools/to_bell/api/tasks", json={"title": "触るだけ"}).get_json()
+
+    saved = client.put(
+        f"/tools/to_bell/api/tasks/{task['id']}",
+        json={"title": "触るだけ", "due_at": task["due_at"][:16], "due_all_day": True},
+    ).get_json()
+    assert saved["due_at"] == task["due_at"]
+    assert saved["due_auto"] is True
+
+
+def test_inbox_holds_every_unfinished_task(app_ctx):
+    """受信箱は完了・アーカイブ以外のすべてのタスク置き場。"""
+    _user(app_ctx, "alice")
+    client = _client(app_ctx, "alice")
+    plain = client.post("/tools/to_bell/api/tasks", json={"title": "期日なしで追加"}).get_json()
+    dated = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "来月の作業", "due_date": "2026-12-01"}
+    ).get_json()
+    done = client.post("/tools/to_bell/api/tasks", json={"title": "終わった作業"}).get_json()
+    archived = client.post("/tools/to_bell/api/tasks", json={"title": "しまった作業"}).get_json()
+    client.post(f"/tools/to_bell/api/tasks/{done['id']}/complete")
+    client.delete(f"/tools/to_bell/api/tasks/{archived['id']}")
+
+    inbox = client.get("/tools/to_bell/api/tasks?filter=inbox").get_json()["tasks"]
+    assert {row["id"] for row in inbox} == {plain["id"], dated["id"]}
+
+
+def test_integration_tasks_stay_out_of_the_inbox(app_ctx):
+    """連携タスクは受信箱にも出さない（「🔗 連携」フィルタ専用のまま）。"""
+    from app.models import ToBellTask, db
+
+    _user(app_ctx, "alice")
+    with app_ctx.app_context():
+        db.session.add(
+            ToBellTask(
+                title="取り込んだ予定",
+                status="todo",
+                priority="normal",
+                due_at=datetime(2026, 9, 1, 10, 0),
+                created_by="alice",
+                assigned_to="alice",
+                source_tool="google",
+                source_ref_type="calendar_event",
+                source_ref_id="alice:e9",
+            )
+        )
+        db.session.commit()
+
+    client = _client(app_ctx, "alice")
+    assert client.get("/tools/to_bell/api/tasks?filter=inbox").get_json()["tasks"] == []
+
+
 def test_template_instantiation_also_gets_today_all_day_due(app_ctx):
     from app.services.to_bell_service import local_today
 
@@ -114,6 +217,7 @@ def test_template_instantiation_also_gets_today_all_day_due(app_ctx):
 
     task = client.post(f"/tools/to_bell/api/templates/{template['id']}/instantiate", json={}).get_json()
     assert task["due_at"] == f"{local_today().isoformat()}T23:59:59"
+    assert task["due_auto"] is True
 
 
 def test_due_date_can_still_be_cleared_to_reach_inbox(app_ctx):
@@ -338,7 +442,8 @@ def test_cloudshift_broadcast_skips_users_without_shiftersync_access(app_ctx):
     assert owners == {"shiftuser"}
 
 
-def test_project_order_is_owned_by_its_creator(app_ctx):
+def test_project_order_is_per_user(app_ctx):
+    """並べ替えは利用者ごと。他人の画面の並びは変えない。"""
     from app.models import ToBellProject, db
 
     office_id = _office(app_ctx, "A")
@@ -353,19 +458,64 @@ def test_project_order_is_owned_by_its_creator(app_ctx):
         for name in ("A", "B", "C")
     ]
 
-    member = _client(app_ctx, "member")
-    result = member.post(
-        "/tools/to_bell/api/projects/reorder", json={"ordered_ids": list(reversed(ids))}
-    ).get_json()
-    assert result["updated"] == 0
+    def names(client):
+        return [p["name"] for p in client.get("/tools/to_bell/api/projects").get_json()["projects"]]
 
+    member = _client(app_ctx, "member")
+    # 作成者でなくても自分のサイドバーは並べ替えられる。
+    assert member.post(
+        "/tools/to_bell/api/projects/reorder", json={"ordered_ids": list(reversed(ids))}
+    ).get_json()["updated"] == 3
+    assert names(member) == ["C", "B", "A"]
+
+    # 他人（作成者を含む）の並びは変わらない。共有カラムも書き換えない。
+    assert names(owner) == ["A", "B", "C"]
     with app_ctx.app_context():
         assert all(db.session.get(ToBellProject, pid).sort_order == 0 for pid in ids)
 
-    # 作成者は並べ替えられる。
+    # 作成者も自分の並びを持てる。
     assert owner.post(
-        "/tools/to_bell/api/projects/reorder", json={"ordered_ids": list(reversed(ids))}
-    ).get_json()["updated"] == 2
+        "/tools/to_bell/api/projects/reorder", json={"ordered_ids": [ids[1], ids[0], ids[2]]}
+    ).get_json()["updated"] == 3
+    assert names(owner) == ["B", "A", "C"]
+    assert names(member) == ["C", "B", "A"]
+
+
+def test_reordering_ignores_projects_the_user_cannot_see(app_ctx):
+    """見えないプロジェクトのIDを渡しても、個人設定には入らない。"""
+    from app.services.to_bell_service import get_project_order
+
+    office_a = _office(app_ctx, "A")
+    office_b = _office(app_ctx, "B")
+    _user(app_ctx, "alice", office_id=office_a)
+    _user(app_ctx, "carol", office_id=office_b)
+
+    carol = _client(app_ctx, "carol")
+    hidden = carol.post(
+        "/tools/to_bell/api/projects", json={"name": "他営業所", "visibility_scope": "office"}
+    ).get_json()["id"]
+
+    alice = _client(app_ctx, "alice")
+    mine = alice.post("/tools/to_bell/api/projects", json={"name": "自分の"}).get_json()["id"]
+    alice.post("/tools/to_bell/api/projects/reorder", json={"ordered_ids": [hidden, mine, mine]})
+
+    with app_ctx.app_context():
+        assert get_project_order("alice") == [mine]
+
+
+def test_newly_created_projects_follow_the_personal_order(app_ctx):
+    """並べ替え後に作ったプロジェクトは末尾に付き、既存の並びを崩さない。"""
+    _user(app_ctx, "alice")
+    client = _client(app_ctx, "alice")
+    ids = [
+        client.post("/tools/to_bell/api/projects", json={"name": name}).get_json()["id"]
+        for name in ("A", "B")
+    ]
+    client.post("/tools/to_bell/api/projects/reorder", json={"ordered_ids": [ids[1], ids[0]]})
+    client.post("/tools/to_bell/api/projects", json={"name": "C"})
+
+    names = [p["name"] for p in client.get("/tools/to_bell/api/projects").get_json()["projects"]]
+    assert names == ["B", "A", "C"]
 
 
 def test_client_cannot_forge_an_integration_task(app_ctx):
@@ -414,6 +564,25 @@ def test_share_link_cannot_reach_outside_to_bell(app_ctx):
     assert guest.post(
         "/tools/to_bell/api/tasks/bulk-delete", json={"name": "共有前タスク"}
     ).status_code == 403
+
+
+def test_share_pages_hide_controls_that_would_be_rejected(app_ctx):
+    """共有リンクの画面に、サーバー側で 403 になる操作のボタンを出さない。"""
+    _user(app_ctx, "alice")
+    _owner, guest = _share_client(app_ctx, "alice")
+
+    html = guest.get("/tools/to_bell/").get_data(as_text=True)
+    assert 'data-tb-share="1"' in html
+    assert 'id="tb-settings-open"' not in html  # 通知設定は共有リンクでは使えない
+    assert 'data-action="delete"' not in html
+    assert 'data-action="links"' not in html
+    assert 'id="tb-share-link"' not in html
+
+    # 通常ログインでは従来どおり出る。
+    owner_html = _client(app_ctx, "alice").get("/tools/to_bell/").get_data(as_text=True)
+    assert 'data-tb-share="0"' in owner_html
+    assert 'id="tb-settings-open"' in owner_html
+    assert 'data-action="delete"' in owner_html
 
 
 def test_share_link_can_still_do_everyday_task_work(app_ctx):
@@ -569,6 +738,33 @@ def test_bulk_delete_removes_attachment_files_too(app_ctx, tmp_path):
     assert list(directory.iterdir()) == []
 
 
+def test_auto_dated_tasks_are_not_swept_away_after_60_days(app_ctx):
+    """期日を指定せず追加したタスクが、自動で入った日付を根拠に消されない。
+
+    以前は期日なし（due_at IS NULL）だったため日次クリーンアップの対象外だった。
+    既定で日付が入るようになった結果、放置したメモが60日で完全削除されてしまう。
+    """
+    from app.models import ToBellTask, db, utc_now
+    from app.services.to_bell_service import cleanup_expired_records
+
+    _user(app_ctx, "alice")
+    client = _client(app_ctx, "alice")
+    auto = client.post("/tools/to_bell/api/tasks", json={"title": "あとでやるメモ"}).get_json()
+    dated = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "本当の締切", "due_date": "2026-01-01"}
+    ).get_json()
+
+    with app_ctx.app_context():
+        old_due = utc_now() - timedelta(days=90)
+        db.session.get(ToBellTask, auto["id"]).due_at = old_due
+        db.session.get(ToBellTask, dated["id"]).due_at = old_due
+        db.session.commit()
+
+        cleanup_expired_records()
+        assert db.session.get(ToBellTask, auto["id"]) is not None
+        assert db.session.get(ToBellTask, dated["id"]) is None
+
+
 def test_future_integration_tasks_survive_the_retention_sweep(app_ctx):
     """まだ先の予定は 30 日ルールで消さない（差分同期では復活しないため）。"""
     from app.models import ToBellTask, db, utc_now
@@ -610,6 +806,42 @@ def test_future_integration_tasks_survive_the_retention_sweep(app_ctx):
 
 
 # ---------------------------------------------------------------- カレンダー同期
+
+def test_integration_retention_uses_local_time_for_due_at(app_ctx, monkeypatch):
+    """due_at はローカル時刻で保存されるので、判定基準もローカルに合わせる。
+
+    UTC より西のタイムゾーンでは、UTC の現在時刻で判定すると「まだ先の予定」を
+    消してしまう（取り込みは差分同期なので復活しない）。
+    """
+    from app.models import ToBellTask, db, utc_now
+    from app.services import to_bell_service
+    from app.services.to_bell_service import cleanup_expired_records
+
+    monkeypatch.setenv("DSTT_TIMEZONE", "America/New_York")  # UTC-4/-5
+    _user(app_ctx, "alice")
+    with app_ctx.app_context():
+        # ローカルでは「3時間後」、UTC では既に過ぎている時刻。
+        local_due = to_bell_service.local_now() + timedelta(hours=3)
+        db.session.add(
+            ToBellTask(
+                title="今夜の予定",
+                status="todo",
+                priority="normal",
+                due_at=local_due,
+                created_by="alice",
+                assigned_to="alice",
+                source_tool="google",
+                source_ref_type="calendar_event",
+                source_ref_id="alice:tonight",
+                created_at=utc_now() - timedelta(days=40),
+            )
+        )
+        db.session.commit()
+        assert local_due < utc_now()  # 前提: UTC 基準だと「過去」に見える
+
+        cleanup_expired_records()
+        assert ToBellTask.query.filter_by(source_ref_id="alice:tonight").first() is not None
+
 
 def test_archiving_a_synced_task_clears_the_calendar_link(app_ctx, monkeypatch):
     from app.models import ToBellGoogleAccount, ToBellTask, db, utc_now
@@ -655,6 +887,69 @@ def test_archiving_a_synced_task_clears_the_calendar_link(app_ctx, monkeypatch):
         assert task.gcal_synced_by is None
 
 
+def _synced_task(app_ctx, *, connected: bool = True):
+    from app.models import ToBellGoogleAccount, ToBellTask, db, utc_now
+
+    with app_ctx.app_context():
+        if connected:
+            db.session.add(
+                ToBellGoogleAccount(
+                    username="alice",
+                    refresh_token="r",
+                    access_token="a",
+                    token_expiry=utc_now() + timedelta(hours=1),
+                )
+            )
+        task = ToBellTask(
+            title="会議",
+            status="todo",
+            priority="normal",
+            due_at=datetime(2026, 9, 1, 10, 0),
+            created_by="alice",
+            assigned_to="alice",
+            gcal_event_id="evt-1",
+            gcal_synced_by="alice",
+        )
+        db.session.add(task)
+        db.session.commit()
+        return task.id
+
+
+def test_failed_calendar_delete_keeps_the_reference(app_ctx, monkeypatch):
+    """予定を消せなかったときに参照まで捨てると、消せない予定が取り残される。"""
+    from app.models import ToBellTask, db
+    from app.services import to_bell_calendar
+
+    _user(app_ctx, "alice")
+    task_id = _synced_task(app_ctx)
+
+    def _boom(*args, **kwargs):
+        raise to_bell_calendar.ToBellCalendarError("接続に失敗しました")
+
+    monkeypatch.setattr(to_bell_calendar, "_calendar_request", _boom)
+    client = _client(app_ctx, "alice")
+    assert client.delete(f"/tools/to_bell/api/tasks/{task_id}").status_code == 200
+
+    with app_ctx.app_context():
+        task = db.session.get(ToBellTask, task_id)
+        assert task.status == "archived"
+        assert task.gcal_event_id == "evt-1"  # あとで外せるように残す
+        assert task.gcal_synced_by == "alice"
+
+
+def test_disconnected_account_keeps_the_reference(app_ctx):
+    """Google 接続が切れていても、参照は残す（予定はカレンダーに残っている）。"""
+    from app.models import ToBellTask, db
+
+    _user(app_ctx, "alice")
+    task_id = _synced_task(app_ctx, connected=False)
+
+    client = _client(app_ctx, "alice")
+    assert client.delete(f"/tools/to_bell/api/tasks/{task_id}").status_code == 200
+    with app_ctx.app_context():
+        assert db.session.get(ToBellTask, task_id).gcal_event_id == "evt-1"
+
+
 def test_patching_a_vanished_event_is_not_reported_as_success(app_ctx):
     """404 を成功扱いにすると「送ったつもりで実体が無い」状態が黙って続く。"""
     from app.services.to_bell_calendar import ToBellCalendarEventMissing, _calendar_request
@@ -682,3 +977,82 @@ def test_patching_a_vanished_event_is_not_reported_as_success(app_ctx):
         assert _calendar_request("DELETE", "/calendars/primary/events/x", _Account(), allow_missing=True) == {}
     finally:
         cal.requests.request = original
+
+
+def test_existing_databases_gain_the_due_auto_column(tmp_path, monkeypatch):
+    """due_auto 列が無い既存DBでも、起動時の ALTER で追加される。
+
+    既存行は「利用者が入れた期日」として扱う（False）。自動で付いた印を後から
+    推測することはできないため、期限切れの扱いを従来どおりに保つ。
+    """
+    import sqlite3
+
+    from app import create_app
+    from app.models import ToBellTask, db
+
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "legacy.db"
+    app = create_app(
+        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}", "TESTING": True, "SECRET_KEY": "s"}
+    )
+    with app.app_context():
+        db.create_all()
+
+    # 旧スキーマを再現し、既存タスクを1件入れておく。
+    conn = sqlite3.connect(db_path)
+    conn.execute("ALTER TABLE to_bell_tasks DROP COLUMN due_auto")
+    conn.execute(
+        "INSERT INTO to_bell_tasks (title, description, status, priority, created_by,"
+        " visibility_scope, progress_mode, manual_progress, pinned, created_at, updated_at)"
+        " VALUES ('既存タスク', '', 'todo', 'normal', 'alice', 'participants', 'auto', 0, 0,"
+        " '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
+    )
+    conn.commit()
+    assert "due_auto" not in {row[1] for row in conn.execute("PRAGMA table_info(to_bell_tasks)")}
+    conn.close()
+
+    restarted = create_app(
+        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}", "TESTING": True, "SECRET_KEY": "s"}
+    )
+    with restarted.app_context():
+        task = ToBellTask.query.first()
+        assert task.title == "既存タスク"
+        assert task.to_dict(include_detail=False)["due_auto"] is False
+
+
+def test_broadcast_recipient_lookup_does_not_scale_with_headcount(app_ctx):
+    """一斉通知の宛先解決が人数ぶんのクエリにならないこと。
+
+    アクセス権判定を1人ずつ行うと、CloudShift の保存リクエストの中で
+    人数×数クエリが走る（40人で122クエリだった）。
+    """
+    from sqlalchemy import event
+
+    from app.models import User, UserToolPermission, db
+    from app.services.to_bell_integrations import enabled_users, update_integrations
+
+    headcount = 40
+    with app_ctx.app_context():
+        for index in range(headcount):
+            user = User(username=f"u{index:03d}", password_hash="hash", name=f"U{index}")
+            db.session.add(user)
+            db.session.flush()
+            db.session.add(UserToolPermission(user_id=user.id, tool_key="shiftersync"))
+        db.session.commit()
+        for index in range(headcount):
+            update_integrations(f"u{index:03d}", {"integrations": {"cloudshift.shift_update": True}})
+
+    executed = []
+
+    def _count(conn, cursor, statement, params, context, executemany):
+        executed.append(statement)
+
+    with app_ctx.test_request_context("/"):
+        event.listen(db.engine, "before_cursor_execute", _count)
+        try:
+            recipients = enabled_users("cloudshift.shift_update")
+        finally:
+            event.remove(db.engine, "before_cursor_execute", _count)
+
+    assert len(recipients) == headcount
+    assert len(executed) <= 10, f"人数に比例したクエリが出ている: {len(executed)}件"

@@ -10,7 +10,7 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='to_bell/to_bell.css') }}">
 
-<div class="tobell-shell" data-tb-user="{{ current_user_id }}">
+<div class="tobell-shell" data-tb-user="{{ current_user_id }}" data-tb-share="{{ 1 if share_session else 0 }}">
   <header class="tobell-header">
     <div class="tobell-header-lead">
       <p class="tobell-kicker">Universal Task Management App</p>
@@ -25,7 +25,9 @@
       {% if not share_session %}
       <button type="button" class="tobell-btn" id="tb-share-link">共有リンク</button>
       {% endif %}
+      {% if not share_session %}
       <button type="button" class="tobell-btn tobell-icon-btn" id="tb-settings-open" aria-label="設定" title="設定">⚙</button>
+      {% endif %}
     </div>
   </header>
 

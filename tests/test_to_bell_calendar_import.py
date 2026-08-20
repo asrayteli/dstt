@@ -862,3 +862,57 @@ def test_initial_window_reaches_a_year_ahead(app_ctx, monkeypatch):
     params = fake.calls[0]["params"]
     span = _dt.fromisoformat(params["timeMax"][:-1]) - _dt.fromisoformat(params["timeMin"][:-1])
     assert span.days >= 365
+
+
+def test_tb_marker_is_only_stripped_when_it_is_a_marker(app_ctx, monkeypatch):
+    """「TB」が語の一部の予定名を削らない（"定例MTB" → "定例M" にしない）。"""
+    from app.models import ToBellTask
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")
+    with app_ctx.app_context():
+        imp.set_import_mode("alice", "all")
+
+    fake = FakeGet([
+        {
+            "items": [
+                _event("e1", "請求 TB", start={"date": "2026-09-01"}),
+                _event("e2", "会議TB", start={"date": "2026-09-02"}),
+                _event("e3", "定例MTB", start={"date": "2026-09-03"}),
+                _event("e4", "TB", start={"date": "2026-09-04"}),
+            ],
+            "nextSyncToken": "tok-1",
+        }
+    ])
+    _patch_get(monkeypatch, fake)
+
+    with app_ctx.app_context():
+        imp.import_for_user("alice")
+        titles = sorted(task.title for task in ToBellTask.query.all())
+    assert titles == ["TB", "会議", "定例MTB", "請求"]
+
+
+def test_switching_mode_does_not_rename_existing_tasks(app_ctx, monkeypatch):
+    """取り込む範囲を変えても、取り込み済みタスクの名前は変わらない。"""
+    from app.models import ToBellTask
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")
+
+    page = {
+        "items": [_event("e1", "請求 TB", start={"date": "2026-09-01"})],
+        "nextSyncToken": "tok",
+    }
+    _patch_get(monkeypatch, FakeGet([dict(page), dict(page)]))
+
+    with app_ctx.app_context():
+        imp.import_for_user("alice")
+        assert [t.title for t in ToBellTask.query.all()] == ["請求"]
+        imp.set_import_mode("alice", "all")
+        result = imp.import_for_user("alice")
+        assert result["updated"] == 0  # 名前が書き換わらないので更新も発生しない
+        assert [t.title for t in ToBellTask.query.all()] == ["請求"]
