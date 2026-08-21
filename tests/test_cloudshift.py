@@ -2394,7 +2394,7 @@ def test_master_shift_targets_can_be_edited_later(tmp_path):
     assert master["people_count"] == 0
 
 
-def test_scene_save_rejects_same_day_conflict_from_another_scene_book(tmp_path):
+def test_scene_save_allows_same_day_conflict_and_only_assist_search_flags_it(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
 
@@ -2442,10 +2442,35 @@ def test_scene_save_rejects_same_day_conflict_from_another_scene_book(tmp_path):
         },
     )
 
+    # 編集画面からの保存は、同日に同じ名前が別のシフト帳へ入っていても通す。
+    # （実在しない「代務」などの仮入力を保存できなくなるため）
     assert alpha_save.status_code == 200
-    assert beta_save.status_code == 409
-    assert "Beta Team" not in beta_save.get_json()["error"]
-    assert "Alpha Team・午前" in beta_save.get_json()["error"]
+    assert beta_save.status_code == 200
+    assert beta_save.get_json()["month"]["entries_per_day"]["1"][0]["value"] == "!E!Alice"
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{beta_id}/assist/rules",
+        json={
+            "weekday": 2,
+            "shift_key": "E",
+            "assignments": [
+                {"candidate_name": "Alice", "employee_number": "", "role_type": "normal", "priority": 1}
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+
+    # 重複の判定はアシストの候補サーチだけで行う。
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{beta_id}/assist/search",
+        json={"target_date": "2026-04-01", "shift_key": "E"},
+    )
+    assert search_response.status_code == 200
+    candidate = next(
+        item for item in search_response.get_json()["results"] if item["name"] == "Alice"
+    )
+    assert candidate["has_scene_conflict"] is True
+    assert candidate["scene_conflict_site_names"] == ["Alpha Team"]
 
 
 def test_spot_search_separates_leave_options_from_available_people_and_dedupes_synced_entries(tmp_path):
