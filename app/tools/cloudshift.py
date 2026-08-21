@@ -4151,8 +4151,15 @@ def _spot_project_visible_to_current_user(project: dict[str, Any]) -> bool:
     return _project_is_shared_with_current_user(project)
 
 
-def _project_created_office_ids(project: dict[str, Any]) -> set[int]:
-    """Return the office ids that identify where the shift book was created."""
+def _project_created_office_ids(
+    project: dict[str, Any], *, owner_office_cache: dict[str, set[int]] | None = None
+) -> set[int]:
+    """Return the office ids that identify where the shift book was created.
+
+    ``created_office_ids`` を持たない古いシフト帳は所有者から引き当てるため DB を引く。
+    多数のシフト帳を横断する呼び出し元は ``owner_office_cache`` を渡して所有者ごとの
+    問い合わせを 1 回に抑えられる。
+    """
     if _is_substitute_project(project):
         office_id = _substitute_office_id(project)
         return {office_id} if office_id else set()
@@ -4171,8 +4178,13 @@ def _project_created_office_ids(project: dict[str, Any]) -> set[int]:
     owner_user_id = str(project.get("owner_user_id") or "").strip()
     if not owner_user_id:
         return set()
+    if owner_office_cache is not None and owner_user_id in owner_office_cache:
+        return set(owner_office_cache[owner_user_id])
     owner = User.query.filter_by(username=owner_user_id).first()
-    return {int(office_id) for office_id in user_office_ids(owner) if office_id is not None} if owner else set()
+    resolved = {int(office_id) for office_id in user_office_ids(owner) if office_id is not None} if owner else set()
+    if owner_office_cache is not None:
+        owner_office_cache[owner_user_id] = set(resolved)
+    return resolved
 
 
 def _spot_project_in_current_office_scope(project: dict[str, Any]) -> bool:
@@ -8797,22 +8809,79 @@ def _rule_effective_for_date(rule: dict[str, Any], target_date: date) -> bool:
     return True
 
 
+ASSIST_CONFLICT_MODE_LABELS = {"scene": "現場シフト", "person": "個人シフト"}
+
+
+def _assist_conflict_scope_office_ids(project: dict[str, Any]) -> set[int]:
+    """同日重複チェックで横断する営業所。
+
+    ログイン中の利用者が所属する営業所を使う。公開編集URLなど営業所を特定
+    できない場合は、対象シフト帳が作られた営業所へ寄せる。
+    """
+    if getattr(current_user, "is_authenticated", False):
+        office_ids = _current_share_office_ids()
+        if office_ids:
+            return office_ids
+    return _project_created_office_ids(project)
+
+
+def _assist_conflict_project_in_scope(
+    other_project: dict[str, Any],
+    *,
+    scope_office_ids: set[int],
+    owner_user_id: str,
+    owner_office_cache: dict[str, set[int]] | None = None,
+) -> bool:
+    if scope_office_ids:
+        created = _project_created_office_ids(other_project, owner_office_cache=owner_office_cache)
+        return bool(created & scope_office_ids)
+    # 営業所を特定できない環境では、従来どおり同じ所有者のシフト帳だけを見る。
+    return not owner_user_id or str(other_project.get("owner_user_id") or "").strip() == owner_user_id
+
+
+def _assist_person_book_identity(project: dict[str, Any]) -> tuple[str, str]:
+    """個人シフト帳が表す人物の (社員番号, 表示名) を返す。"""
+    employee_number = str(project.get("employee_number") or "").strip()
+    title = str(project.get("title") or "").strip()
+    return employee_number, ("" if title == PERSON_UNASSIGNED_TITLE else title)
+
+
 def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -> list[dict[str, str]]:
-    owner_user_id = str(project.get("owner_user_id") or "").strip()
+    """対象日に同じ人がすでに入っている既存シフトを、現場・個人シフト帳から集める。
+
+    - 範囲は同じ営業所のシフト帳すべて（他の所有者のものも含む）。営業所を特定
+      できないときだけ、従来どおり同じ所有者のシフト帳に限定する。
+    - 個人シフト帳は「帳簿＝人」なので、人物は帳簿側（社員番号・タイトル）、
+      勤務先はエントリ名（現場名）から取る。
+    - 他帳から同期された鏡像エントリは実配置の複製なので数えない（元帳側で1回だけ数える）。
+    """
     project_id = str(project.get("id") or "").strip()
+    owner_user_id = str(project.get("owner_user_id") or "").strip()
+    scope_office_ids = _assist_conflict_scope_office_ids(project)
     month_key = _month_key(target_date.year, target_date.month)
     day_key = str(target_date.day)
     entries: list[dict[str, str]] = []
-    seen: set[tuple[str, str, str, str]] = set()
-    # 参照するのは対象月の scene 帳のみ。全プロジェクト・全月のフルロードを避ける。
-    for other_project in _iter_project_summaries_for_month(month_key, mode="scene"):
-        if not other_project:
+    seen: set[tuple[str, str, str, str, str]] = set()
+    owner_office_cache: dict[str, set[int]] = {}
+    # 参照するのは対象月の現場・個人帳のみ。全プロジェクト・全月のフルロードを避ける。
+    other_projects = [
+        *_iter_project_summaries_for_month(month_key, mode="scene"),
+        *_iter_project_summaries_for_month(month_key, mode="person"),
+    ]
+    for other_project in other_projects:
+        if not isinstance(other_project, dict):
             continue
         if str(other_project.get("id") or "").strip() == project_id:
             continue
-        if str(other_project.get("mode") or "").strip() != "scene":
+        other_mode = str(other_project.get("mode") or "").strip()
+        if other_mode not in ASSIST_CONFLICT_MODE_LABELS:
             continue
-        if owner_user_id and str(other_project.get("owner_user_id") or "").strip() != owner_user_id:
+        if not _assist_conflict_project_in_scope(
+            other_project,
+            scope_office_ids=scope_office_ids,
+            owner_user_id=owner_user_id,
+            owner_office_cache=owner_office_cache,
+        ):
             continue
         month_data = (other_project.get("months") or {}).get(month_key)
         if not isinstance(month_data, dict):
@@ -8820,25 +8889,39 @@ def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -
         day_entries = (month_data.get("entries_per_day") or {}).get(day_key)
         if not isinstance(day_entries, list):
             continue
-        project_title = str(other_project.get("title") or "").strip() or "名称未設定"
         other_project_id = str(other_project.get("id") or "").strip()
+        book_title = str(other_project.get("title") or "").strip() or "名称未設定"
+        book_employee_number, book_person_name = _assist_person_book_identity(other_project)
         for entry in day_entries:
             if not isinstance(entry, dict):
                 continue
+            if str(entry.get("sync_source_type") or "").strip():
+                continue
             shift_key, entry_name = parse_entry_value(entry.get("value") or "")
-            employee_number = str(entry.get("employee_number") or "").strip()
-            normalized_name = str(entry_name or "").strip()
-            key = (other_project_id, str(shift_key or "").strip(), employee_number, normalized_name)
+            normalized_shift_key = str(shift_key or "").strip()
+            if other_mode == "person":
+                person_name = book_person_name
+                employee_number = book_employee_number
+                where_label = str(entry_name or "").strip() or book_title
+            else:
+                person_name = str(entry_name or "").strip()
+                employee_number = str(entry.get("employee_number") or "").strip()
+                where_label = book_title
+            if not person_name and not employee_number:
+                continue
+            key = (other_project_id, normalized_shift_key, employee_number, person_name, where_label)
             if key in seen:
                 continue
             seen.add(key)
             entries.append(
                 {
                     "project_id": other_project_id,
-                    "project_title": project_title,
-                    "shift_key": str(shift_key or "").strip(),
+                    "project_title": where_label,
+                    "project_mode": other_mode,
+                    "project_mode_label": ASSIST_CONFLICT_MODE_LABELS[other_mode],
+                    "shift_key": normalized_shift_key,
                     "shift_label": _assist_shift_label(shift_key),
-                    "entry_name": normalized_name,
+                    "entry_name": person_name,
                     "employee_number": employee_number,
                 }
             )
@@ -8864,8 +8947,10 @@ def _assist_candidate_matches_scene_entry(
     normalized_entry_number = str(entry_employee_number or "").strip()
     if normalized_candidate_number and normalized_entry_number:
         return normalized_candidate_number == normalized_entry_number
-    normalized_candidate_name = str(candidate_name or "").strip()
-    normalized_entry_name = str(entry_name or "").strip()
+    # 社員番号が片方でも欠けるときは氏名で照合する。全角スペースや大小文字の
+    # ゆれで取りこぼさないよう、他の横断チェックと同じ正規化を通す。
+    normalized_candidate_name = _normalized_person_title(candidate_name)
+    normalized_entry_name = _normalized_person_title(entry_name)
     return bool(normalized_candidate_name and normalized_entry_name and normalized_candidate_name == normalized_entry_name)
 
 
@@ -8895,6 +8980,7 @@ def _assist_scene_conflicts_for_candidate(
             str(other_shift_key or ""),
             str(entry.get("employee_number") or "").strip(),
             str(entry.get("entry_name") or "").strip(),
+            str(entry.get("project_title") or "").strip(),
         )
         if key in seen:
             continue
@@ -8903,6 +8989,8 @@ def _assist_scene_conflicts_for_candidate(
             {
                 "project_id": str(entry.get("project_id") or "").strip(),
                 "project_title": str(entry.get("project_title") or "").strip(),
+                "project_mode": str(entry.get("project_mode") or "").strip(),
+                "project_mode_label": str(entry.get("project_mode_label") or "").strip(),
                 "shift_key": str(other_shift_key or ""),
                 "shift_label": str(entry.get("shift_label") or _assist_shift_label(other_shift_key)),
                 "entry_name": str(entry.get("entry_name") or "").strip(),

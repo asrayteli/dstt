@@ -2667,6 +2667,7 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "blocked_weekdays" in script
     assert "has_scene_conflict" in script
     assert "scene_conflict_site_names" in script
+    assert "conflict.project_mode_label" in script
     assert "同日勤務あり" in script
     assert "ss-entry-assist-search-btn" in ss_common_js
     assert "アシストで候補を探す" in ss_common_js
@@ -3336,6 +3337,144 @@ def test_scene_assist_search_marks_same_day_scene_conflicts_only_for_competing_s
     assert result["scene_conflict_site_count"] == 1
     assert [item["project_title"] for item in result["scene_conflicts"]] == ["Conflict Site"]
     assert result["scene_conflicts"][0]["shift_key"] == "E"
+    assert result["scene_conflicts"][0]["project_mode"] == "scene"
+
+
+def test_assist_search_flags_conflicts_from_person_books_across_the_same_office(tmp_path):
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        branch = AccessBranch(name="Conflict Branch", code="CFB")
+        db.session.add(branch)
+        db.session.flush()
+        office_a = AccessOffice(branch_id=branch.id, name="Office A", code="CFA")
+        office_b = AccessOffice(branch_id=branch.id, name="Office B", code="CFB2")
+        db.session.add_all([office_a, office_b])
+        db.session.commit()
+        office_a_id = office_a.id
+        office_b_id = office_b.id
+
+    searcher = _employee_user("owner01", office_id=office_a_id, name="Searcher")
+    same_office_colleague = _employee_user("owner02", office_id=office_a_id, name="Same Office")
+    other_office_owner = _employee_user("owner03", office_id=office_b_id, name="Other Office")
+
+    module.current_user = searcher
+    base = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Base Scene", "mode": "scene", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    base_id = base["project"]["id"]
+    assert client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{base_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "A",
+            "assignments": [
+                {"candidate_name": "Busy User", "employee_number": "7001", "role_type": "normal", "priority": 1}
+            ],
+        },
+    ).status_code == 200
+
+    # 同じ営業所の別の人が持つ「個人シフト帳」に、同じ日の勤務が入っている。
+    module.current_user = same_office_colleague
+    person_book = _create_person_project(
+        client, title="Busy User", employee_number="7001", year="2026", month="4"
+    ).get_json()["project"]
+    person_id = person_book["project"]["id"]
+    person_entries = dict(person_book["month"]["entries_per_day"])
+    person_entries["7"] = [{"id": "p-1", "value": "!E!Neighbour Site", "comment": ""}]
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={"entries_per_day": person_entries, "base_month": _legacy_base_month(person_book["month"])},
+    ).status_code == 200
+
+    # 別営業所のシフト帳は対象外。
+    module.current_user = other_office_owner
+    far_book = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Far Office Scene", "mode": "scene", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    far_id = far_book["project"]["id"]
+    far_entries = dict(far_book["month"]["entries_per_day"])
+    far_entries["7"] = [
+        {"id": "f-1", "value": "!E!Busy User", "comment": "", "employee_number": "7001"}
+    ]
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{far_id}/month/2026/4",
+        json={"entries_per_day": far_entries, "base_month": _legacy_base_month(far_book["month"])},
+    ).status_code == 200
+
+    module.current_user = searcher
+    payload = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{base_id}/assist/search",
+        json={"target_date": "2026-04-07", "shift_key": "A"},
+    ).get_json()
+    result = next(item for item in payload["results"] if item["name"] == "Busy User")
+    assert result["has_scene_conflict"] is True
+    # 勤務先として個人シフト帳のエントリ名（現場名）が出て、別営業所の分は入らない。
+    assert result["scene_conflict_site_names"] == ["Neighbour Site"]
+    assert [item["project_mode"] for item in result["scene_conflicts"]] == ["person"]
+    assert result["scene_conflicts"][0]["project_mode_label"] == "個人シフト"
+    assert result["scene_conflicts"][0]["employee_number"] == "7001"
+
+
+def test_assist_search_ignores_synced_mirror_entries_of_the_searching_book(tmp_path):
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        branch = AccessBranch(name="Mirror Branch", code="MRB")
+        db.session.add(branch)
+        db.session.flush()
+        office = AccessOffice(branch_id=branch.id, name="Mirror Office", code="MRO")
+        db.session.add(office)
+        db.session.commit()
+        office_id = office.id
+
+    module.current_user = _employee_user("owner01", office_id=office_id, name="Owner")
+    base = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Mirror Scene", "mode": "scene", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    base_id = base["project"]["id"]
+    assert client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{base_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "A",
+            "assignments": [
+                {"candidate_name": "Mirror User", "employee_number": "7101", "role_type": "normal", "priority": 1}
+            ],
+        },
+    ).status_code == 200
+
+    person_book = _create_person_project(
+        client, title="Mirror User", employee_number="7101", year="2026", month="4"
+    ).get_json()["project"]
+    person_id = person_book["project"]["id"]
+    person_entries = dict(person_book["month"]["entries_per_day"])
+    person_entries["7"] = [
+        {
+            "id": "mirror-1",
+            "value": "!E!Mirror Scene",
+            "comment": "",
+            "sync_source_type": "scene_shift",
+            "sync_source_project_id": base_id,
+            "sync_source_month_key": "2026-04",
+            "sync_source_day": "7",
+            "sync_source_entry_id": "base-1",
+        }
+    ]
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={"entries_per_day": person_entries, "base_month": _legacy_base_month(person_book["month"])},
+    ).status_code == 200
+
+    payload = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{base_id}/assist/search",
+        json={"target_date": "2026-04-07", "shift_key": "A"},
+    ).get_json()
+    result = next(item for item in payload["results"] if item["name"] == "Mirror User")
+    # 自分の帳簿からコピーされた鏡像なので、二重には数えない。
+    assert result["has_scene_conflict"] is False
+    assert result["scene_conflicts"] == []
 
 
 def test_public_edit_assist_can_edit_records_but_not_rules(tmp_path):
