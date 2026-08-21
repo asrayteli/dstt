@@ -3394,10 +3394,16 @@
 
     function buildAssistSceneConflictNotice(item) {
       const conflicts = Array.isArray(item && item.scene_conflicts) ? item.scene_conflicts : [];
-      const shiftLines = conflicts.map((conflict) => [
-        String(conflict.project_title || '').trim(),
-        String(conflict.shift_label || '').trim()
-      ].filter(Boolean).join('・')).filter(Boolean);
+      const shiftLines = conflicts.map((conflict) => {
+        const body = [
+          String(conflict.project_title || '').trim(),
+          String(conflict.shift_label || '').trim()
+        ].filter(Boolean).join('・');
+        if (!body) return '';
+        // 現場シフト帳か個人シフト帳かが分かるようにしておく。
+        const modeLabel = String(conflict.project_mode_label || '').trim();
+        return modeLabel ? `${body}（${modeLabel}）` : body;
+      }).filter(Boolean);
       const siteNames = Array.isArray(item && item.scene_conflict_site_names)
         ? item.scene_conflict_site_names.map((name) => String(name || '').trim()).filter(Boolean)
         : [];
