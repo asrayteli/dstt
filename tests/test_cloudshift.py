@@ -2668,6 +2668,17 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "has_scene_conflict" in script
     assert "scene_conflict_site_names" in script
     assert "同日勤務あり" in script
+    assert "ss-entry-assist-search-btn" in ss_common_js
+    assert "アシストで候補を探す" in ss_common_js
+    assert "state.entryAssistEnabled" in ss_common_js
+    assert "state.onEntryAssist" in ss_common_js
+    assert ".ss-entry-assist-action" in ss_common_css
+    assert "onEntryAssist: entryAssistEnabled ? openAssistSearchForEntry : null" in script
+    assert "async function openAssistSearchForEntry" in script
+    assert "function assistTargetEntryIdFromContext" in script
+    assert "function replaceAssistTargetEntryWithCandidate" in script
+    assert "と入れ替える" in script
+    assert "エントリの名前を候補者に差し替えました" in script
     assert "勤務中:" in script
     assert "経験済み現場（代務）" in script
     assert "経験済み現場（研修）" in script
