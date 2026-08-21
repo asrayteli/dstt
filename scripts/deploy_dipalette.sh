@@ -24,6 +24,7 @@ python3 "$backup_script" \
 
 git fetch origin
 git merge --ff-only "$target"
+deployed=$(git rev-parse HEAD)
 "$venv/bin/python" -m pip install --disable-pip-version-check -r requirements.txt
 "$venv/bin/python" -m compileall -q app scripts
 "$venv/bin/python" scripts/predeploy_check.py
@@ -33,17 +34,68 @@ if [[ ! -s "$pidfile" ]]; then
     echo "Gunicorn PID file is missing; use systemctl restart dstt" >&2
     exit 1
 fi
-kill -HUP "$(cat "$pidfile")"
+master_pid=$(cat "$pidfile")
+old_workers=$(pgrep -P "$master_pid" || true)
+kill -HUP "$master_pid"
 
+workers_reloaded=false
 for attempt in {1..30}; do
-    if curl --fail --silent --show-error \
-        --resolve dstt.dipalette.com:443:127.0.0.1 \
-        https://dstt.dipalette.com/health/ready >/dev/null; then
-        printf 'deployed=%s previous=%s health=ok\n' "$(git rev-parse HEAD)" "$previous"
-        exit 0
+    current_workers=$(pgrep -P "$master_pid" || true)
+    old_worker_still_running=false
+    for old_worker in $old_workers; do
+        if grep -qx "$old_worker" <<<"$current_workers"; then
+            old_worker_still_running=true
+            break
+        fi
+    done
+    if [[ -n "$current_workers" && "$old_worker_still_running" == false ]] && \
+        curl --fail --silent --show-error \
+            --resolve dstt.dipalette.com:443:127.0.0.1 \
+            https://dstt.dipalette.com/health/ready >/dev/null; then
+        workers_reloaded=true
+        break
     fi
     sleep 1
 done
 
-echo "Deployment health check failed; previous revision was $previous" >&2
-exit 1
+if [[ "$workers_reloaded" != true ]]; then
+    echo "Deployment worker reload/health check failed; previous revision was $previous" >&2
+    exit 1
+fi
+
+verify_public_asset() {
+    local path=$1
+    local relative=${path#app/static/}
+    local expected encoded actual
+    expected=$(sha256sum "$path" | awk '{print $1}')
+    encoded=$(
+        "$venv/bin/python" -c \
+            'import sys; from urllib.parse import quote; print(quote(sys.argv[1]))' \
+            "$relative"
+    )
+    actual=$(
+        curl --fail --silent --show-error \
+            "https://dstt.dipalette.com/static/${encoded}?v=${expected:0:16}" \
+            | sha256sum | awk '{print $1}'
+    )
+    if [[ "$actual" != "$expected" ]]; then
+        echo "Public static asset mismatch: $relative (expected=$expected actual=$actual)" >&2
+        return 1
+    fi
+    printf 'static_asset=ok path=%s hash=%s\n' "$relative" "$expected"
+}
+
+declare -A assets_to_verify=(
+    [app/static/shiftersync/js/ss_common.js]=1
+    [app/static/shiftersync/css/ss_common.css]=1
+)
+while IFS= read -r -d '' changed_asset; do
+    [[ -f "$changed_asset" ]] && assets_to_verify["$changed_asset"]=1
+done < <(git diff --name-only -z "$previous" "$deployed" -- app/static)
+
+for asset in "${!assets_to_verify[@]}"; do
+    verify_public_asset "$asset"
+done
+
+printf 'deployed=%s previous=%s health=ok workers=reloaded static_assets=ok\n' \
+    "$deployed" "$previous"
