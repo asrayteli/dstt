@@ -3279,17 +3279,12 @@
       const replaceTarget = assistReplaceTargetEntry();
       const replaceTargetName = replaceTarget ? assistReplaceTargetLabel(replaceTarget) : '';
       return `
-        ${replaceTarget ? `
-          <div class="cloud-inline-note">
-            ${escapeHtml(`${assistTargetDayFromContext()}日の「${replaceTargetName || '対象のエントリ'}」を差し替えます。`)}
-            オプション・第二オプション・コメント・並び順はそのままで、名前と社員番号だけが入れ替わります。
-          </div>
-        ` : ''}
         <div class="cloud-assist-section cloud-assist-section-search-form">
           <div class="cloud-assist-subhead">
               <div>
                 <strong>候補検索</strong>
                 <p class="cloud-panel-note">指定日の曜日とオプションから、候補者を点数付きで提案します。オプションなし検索もできます。</p>
+                ${replaceTarget ? `<p class="cloud-panel-note">${escapeHtml(`${assistTargetDayFromContext()}日の「${replaceTargetName || '対象のエントリ'}」を差し替えます。オプション・第二オプション・コメント・並び順はそのままで、名前と社員番号だけが入れ替わります。`)}</p>` : ''}
               </div>
           </div>
           <form data-assist-search-form class="cloud-assist-form">
@@ -5655,21 +5650,22 @@
         return;
       }
       const parsed = parseCalendarAssistEntry(entry);
-      const dateText = assistDateTextForDay(day);
+      // 検索条件は日付セルの「詳細」→「アシスト」から開いたときと同じにする。
+      // 同日競合の判定はここで渡すオプションに左右されるため、入口によって
+      // 結果が変わらないようにそろえておく。差し替え時はエントリ自身の
+      // オプション・コメント・並び順をそのまま残す。
+      const searchPayload = assistDaySearchPayload(day, assistSelectedShiftKeyForDay(day));
       await openAssistModal({
         activeTab: 'search',
         recordDraft: null,
         dayContext: {
           day,
-          date: dateText,
-          shift_key: parsed.shift_key,
+          date: searchPayload.target_date,
+          shift_key: searchPayload.shift_key,
           entry_id: entryId,
           entry_name: parsed.candidate_name
         },
-        searchForm: {
-          target_date: dateText,
-          shift_key: parsed.shift_key
-        },
+        searchForm: searchPayload,
         autoSearch: true
       });
     }

@@ -2670,12 +2670,20 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "conflict.project_mode_label" in script
     assert "同日勤務あり" in script
     assert "ss-entry-assist-search-btn" in ss_common_js
-    assert "アシストで候補を探す" in ss_common_js
+    # エントリ詳細のフッターで「閉じる」の左に「アシスト」ボタンを出す（説明文は付けない）。
+    assert '>アシスト</button>' in ss_common_js
+    assert (
+        '''>アシスト</button>` : ''}
+          <button type="button" class="btn-secondary" data-close-modal="entry">'''
+        in ss_common_js
+    )
+    assert "ss-entry-assist-action" not in ss_common_js
     assert "state.entryAssistEnabled" in ss_common_js
     assert "state.onEntryAssist" in ss_common_js
-    assert ".ss-entry-assist-action" in ss_common_css
     assert "onEntryAssist: entryAssistEnabled ? openAssistSearchForEntry : null" in script
     assert "async function openAssistSearchForEntry" in script
+    # エントリ詳細からのサーチも、日付セルの「詳細」から開いたときと同じ検索条件にする。
+    assert "assistDaySearchPayload(day, assistSelectedShiftKeyForDay(day))" in script
     assert "function assistTargetEntryIdFromContext" in script
     assert "function replaceAssistTargetEntryWithCandidate" in script
     assert "と入れ替える" in script

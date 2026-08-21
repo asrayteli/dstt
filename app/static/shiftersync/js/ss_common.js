@@ -3526,12 +3526,6 @@ const ShifterSync = (function() {
           >
           <div id="ss-entry-modal-selected-note" class="ss-selected-note${entry.employee_number || selectedSite.site_id ? '' : ' ss-hidden'}">${entry.employee_number ? `選択中: ${escapeHtml(parsed.name)} / ${escapeHtml(entry.employee_number)}` : selectedSite.site_id ? `選択中: ${escapeHtml([selectedSite.site_id, selectedSite.site_name].filter(Boolean).join(' / '))}` : ''}</div>
           <div id="ss-entry-modal-candidate-panel" class="ss-candidate-panel ss-hidden" data-search-kind="modal"></div>
-          ${canAssistEntry ? `
-            <div class="ss-entry-assist-action">
-              <button type="button" class="btn-secondary ss-entry-assist-search-btn" data-day="${day}" data-entry-id="${escapeHtml(entry.id)}">アシストで候補を探す</button>
-              <div class="ss-detail-empty-text">オプション・コメント・並び順はそのままで、名前だけを候補者へ差し替えられます。今の内容を保存してからアシストを開きます。</div>
-            </div>
-          ` : ''}
         </div>
         <div class="ss-detail-field">
           <label class="ss-detail-label" for="ss-entry-modal-option">\u30aa\u30d7\u30b7\u30e7\u30f3</label>
@@ -3642,6 +3636,7 @@ const ShifterSync = (function() {
           </div>
         ` : ''}
         <div class="ss-detail-actions foot">
+          ${canAssistEntry ? `<button type="button" class="btn-secondary ss-entry-assist-search-btn" data-day="${day}" data-entry-id="${escapeHtml(entry.id)}">アシスト</button>` : ''}
           <button type="button" class="btn-secondary" data-close-modal="entry">\u9589\u3058\u308b</button>
           ${canRequestSubstitute ? `<button type="button" class="btn-secondary ss-entry-substitute-request-btn" data-day="${day}" data-entry-id="${escapeHtml(entry.id)}">\u4ee3\u52d9\u8981\u8acb</button>` : ''}
           <button type="button" class="btn-primary ss-entry-save-btn">\u4fdd\u5b58</button>
