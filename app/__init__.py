@@ -16,6 +16,7 @@ from pathlib import Path
 from .navigation import NAV_ITEMS
 from .versioning import calculate_repo_version
 from .runtime_paths import configured_data_root, instance_path, prepare_data_root
+from .static_assets import enable_static_asset_versioning
 
 try:
     import fcntl
@@ -826,6 +827,7 @@ def create_app(test_config=None):
         prepare_data_root(resolved_instance_path)
         flask_options["instance_path"] = str(resolved_instance_path)
     app = Flask(__name__, **flask_options)
+    enable_static_asset_versioning(app)
     if data_root is not None:
         app.config["DSTT_DATA_DIR"] = str(data_root)
     app_version = os.environ.get('DSTT_APP_VERSION')
