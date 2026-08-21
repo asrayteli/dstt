@@ -3276,7 +3276,15 @@
       const searchForm = state.assist.searchForm || {};
       const result = state.assist.searchResult;
       const resultCount = result && Array.isArray(result.results) ? result.results.length : 0;
+      const replaceTarget = assistReplaceTargetEntry();
+      const replaceTargetName = replaceTarget ? assistReplaceTargetLabel(replaceTarget) : '';
       return `
+        ${replaceTarget ? `
+          <div class="cloud-inline-note">
+            ${escapeHtml(`${assistTargetDayFromContext()}日の「${replaceTargetName || '対象のエントリ'}」を差し替えます。`)}
+            オプション・第二オプション・コメント・並び順はそのままで、名前と社員番号だけが入れ替わります。
+          </div>
+        ` : ''}
         <div class="cloud-assist-section cloud-assist-section-search-form">
           <div class="cloud-assist-subhead">
               <div>
@@ -4738,18 +4746,64 @@
       });
     }
 
+    function assistTargetEntryIdFromContext() {
+      const context = state.assist.dayContext || {};
+      return String(context.entry_id || '').trim();
+    }
+
+    // エントリ詳細から開いたアシストでは「追加」ではなく、その行の差し替えになる。
+    function assistReplaceTargetEntry() {
+      const day = assistTargetDayFromContext();
+      const entryId = assistTargetEntryIdFromContext();
+      if (!day || !entryId) return null;
+      return currentEntryByDayAndId(String(day), entryId);
+    }
+
+    function assistReplaceTargetLabel(entry) {
+      const parsed = parseCalendarAssistEntry(entry);
+      return parsed.candidate_name || String((state.assist.dayContext || {}).entry_name || '');
+    }
+
+    function replaceAssistTargetEntryWithCandidate(candidate) {
+      const day = assistTargetDayFromContext();
+      const entryId = assistTargetEntryIdFromContext();
+      const name = String(candidate && candidate.name ? candidate.name : '').trim();
+      if (!day || !entryId || !name) return false;
+      const dayKey = String(day);
+      const nextEntries = deepClone(currentEntriesSnapshot() || {});
+      const dayEntries = Array.isArray(nextEntries[dayKey]) ? nextEntries[dayKey] : null;
+      if (!dayEntries) return false;
+      const index = dayEntries.findIndex((entry) => String(entry && entry.id ? entry.id : '') === entryId);
+      if (index < 0) return false;
+      const target = dayEntries[index];
+      // オプション・コメント・第二オプション・枝番号・並び順はそのまま。
+      // 差し替えるのは表示名と社員番号だけにする。
+      const shiftKey = String(parseCalendarAssistEntry(target).shift_key || '');
+      dayEntries[index] = Object.assign({}, target, {
+        value: shiftKey ? `!${shiftKey}!${name}` : name,
+        employee_name: name,
+        employee_number: String(candidate && candidate.employee_number ? candidate.employee_number : '').trim()
+      });
+      replaceCalendarEntries(nextEntries);
+      return true;
+    }
+
     function buildAssistSearchResultAction(item, index) {
       if (!canAppendAssistSearchResultToDay()) return '';
       const day = assistTargetDayFromContext();
       if (item && item.has_scene_conflict) {
         return '<button type="button" class="cloud-btn secondary" disabled>同日勤務あり</button>';
       }
+      const replaceTarget = assistReplaceTargetEntry();
+      const label = replaceTarget
+        ? `${assistReplaceTargetLabel(replaceTarget) || `${day}日のエントリ`}と入れ替える`
+        : `${day}日のシフトに追加`;
       return `
         <button
           type="button"
           class="cloud-btn secondary"
           data-assist-add-search-result-index="${escapeHtml(String(index))}"
-        >${escapeHtml(`${day}日のシフトに追加`)}</button>
+        >${escapeHtml(label)}</button>
       `;
     }
 
@@ -5416,6 +5470,14 @@
             showFlash('追加対象の候補が見つかりません', 'error');
             return;
           }
+          if (assistTargetEntryIdFromContext()) {
+            if (!replaceAssistTargetEntryWithCandidate(candidate)) {
+              showFlash('差し替え対象のエントリが見つかりませんでした', 'error');
+              return;
+            }
+            notifyAssistAction('エントリの名前を候補者に差し替えました。オプション・コメントはそのままです。保存ボタンで確定してください');
+            return;
+          }
           if (!appendAssistSearchResultToDay(candidate)) {
             showFlash('候補をシフトに追加できませんでした', 'error');
             return;
@@ -5570,6 +5632,40 @@
         await executeAssistSearch(state.assist.searchForm || {});
       }
       renderAssistModalContent(modal);
+    }
+
+    // エントリ詳細（ss_common のエントリモーダル）からアシストの候補サーチを開く。
+    // 「未定」などの仮の名前で押さえておいた行を、後から実在する人へ差し替えるための入口。
+    async function openAssistSearchForEntry(context) {
+      const day = String(context && context.day ? context.day : '').trim();
+      const entryId = String(context && context.entryId ? context.entryId : '').trim();
+      const entry = (context && context.entry) || currentEntryByDayAndId(day, entryId);
+      if (!day || !entryId || !entry) {
+        showFlash('対象のエントリが見つからないためアシストを開けません', 'error');
+        return;
+      }
+      if (currentAssistMode() !== 'scene') {
+        showFlash('エントリからの候補サーチは現場シフトで利用できます', 'info');
+        return;
+      }
+      const parsed = parseCalendarAssistEntry(entry);
+      const dateText = assistDateTextForDay(day);
+      await openAssistModal({
+        activeTab: 'search',
+        recordDraft: null,
+        dayContext: {
+          day,
+          date: dateText,
+          shift_key: parsed.shift_key,
+          entry_id: entryId,
+          entry_name: parsed.candidate_name
+        },
+        searchForm: {
+          target_date: dateText,
+          shift_key: parsed.shift_key
+        },
+        autoSearch: true
+      });
     }
 
     async function openAssistDayActionModal(day) {
@@ -7566,6 +7662,12 @@
         && editable
         && projectAccessRole(project) !== 'viewer'
         && (project.mode === 'scene' || project.mode === 'person');
+      // エントリ詳細からアシストの候補サーチを開けるのは、候補サーチが使える
+      // 現場シフトを編集しているときだけ（アシスト自体は公開編集URLからも使える）。
+      const entryAssistEnabled = editable
+        && project.mode === 'scene'
+        && projectAccessRole(project) !== 'viewer'
+        && (PAGE.type === 'owner' || PAGE.accessMode === 'edit');
       const leaveChangeRequestEnabled = PAGE.type === 'public'
         && PAGE.accessMode === 'view'
         && project.mode === 'person'
@@ -7580,6 +7682,8 @@
         editable,
         substituteRequestEnabled,
         onSubstituteRequest: substituteRequestEnabled ? requestSubstituteFromEntry : null,
+        entryAssistEnabled,
+        onEntryAssist: entryAssistEnabled ? openAssistSearchForEntry : null,
         leaveChangeRequestEnabled,
         onLeaveChangeRequest: leaveChangeRequestEnabled ? submitLeaveChangeRequestFromPublicView : null,
         leaveChangePendingRequestEntryIds: state.projectPayload && state.projectPayload.viewer_capabilities

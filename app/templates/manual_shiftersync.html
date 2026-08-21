@@ -932,6 +932,41 @@
         <img src="{{ url_for('static', filename='cloudshift/manual/11_assist_search.png') }}" alt="アシストの候補検索（サーチ）" loading="lazy">
         <figcaption>「サーチ」タブの候補検索。対象日とオプションを指定して「候補を検索」すると、右側に候補者が点数付きで一覧されます（1 日・1 枠ぶんの候補提案）。</figcaption>
       </figure>
+      <div class="csm-note" style="margin-top:10px">📌 サーチの候補に出る「<strong>同日競合</strong>」は、<strong>アシストの候補検索だけ</strong>の事前チェックです（同じ日・同じ所有者の別の現場シフトに同じ人が入っている候補は追加できません）。<strong>編集画面での入力・保存は止めません</strong>。「代務」など仮の名前を複数のシフト帳へ同じ日に入れても保存できます。入力済みの重なりを確かめたいときは「重複チェック」タブを使ってください。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🔁 エントリ詳細から人だけ差し替える<span class="csm-tag csm-tag-sky" style="margin-left:6px">現場のみ</span></div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">先に「未定」などの<strong>仮の名前</strong>でシフトを押さえておき、あとからアシストで実在する人に差し替えられます。オプションやコメントを先に決めておける入れ方です。</p>
+      <div class="csm-flow">
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 1</div>
+          <div class="csm-flow-label">仮の名前で入れる</div>
+          <div class="csm-flow-note">「未定」などで追加し、オプション・第二オプション・コメントを先に入れておきます</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 2</div>
+          <div class="csm-flow-label">エントリ詳細を開く</div>
+          <div class="csm-flow-note">入力済みの行をクリックし、名前欄の下の「アシストで候補を探す」を押します</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 3</div>
+          <div class="csm-flow-label">候補を選ぶ</div>
+          <div class="csm-flow-note">その日・そのオプションで候補が並ぶので、「〇〇と入れ替える」を押します</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 4</div>
+          <div class="csm-flow-label">この月を保存</div>
+          <div class="csm-flow-note">名前と社員番号だけが入れ替わった状態で確定します</div>
+        </div>
+      </div>
+      <ul class="csm-ul" style="margin-top:10px">
+        <li><strong>そのまま残るもの</strong>：オプション・第二オプション・コメント・枝番号・勤怠／出勤時間の表示・カレンダー内の並び順。</li>
+        <li><strong>入れ替わるもの</strong>：表示される名前と社員番号だけです。</li>
+        <li>「アシストで候補を探す」を押すと、その時点のエントリ詳細の内容を<strong>先に保存</strong>してからアシストが開きます。</li>
+        <li>同じ日に別の現場へ入っている候補は「<strong>同日勤務あり</strong>」となり選べません（同日競合の事前チェック）。</li>
+      </ul>
+      <div class="csm-note" style="margin-top:10px">📌 現場シフトの編集時のみ使えます（候補サーチが現場シフト専用のため）。同期で自動反映された行では出ません。その場合は「反映元を編集」から元のシフトで差し替えてください。</div>
     </div>
 
     <div class="csm-card">

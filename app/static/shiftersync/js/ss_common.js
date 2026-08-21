@@ -118,6 +118,8 @@ const ShifterSync = (function() {
     suppressEntryClick: false,
     substituteRequestEnabled: false,
     onSubstituteRequest: null,
+    entryAssistEnabled: false,
+    onEntryAssist: null,
     leaveChangeRequestEnabled: false,
     onLeaveChangeRequest: null,
     leaveChangePendingRequestEntryIds: new Set()
@@ -2356,6 +2358,7 @@ const ShifterSync = (function() {
     $(document).off('click', '.ss-entry-save-btn');
     $(document).off('click', '.ss-day-substitute-request-btn');
     $(document).off('click', '.ss-entry-substitute-request-btn');
+    $(document).off('click', '.ss-entry-assist-search-btn');
     $(document).off('click', '.ss-entry-leave-change-request-btn');
     $(document).off('change', '#ss-entry-modal-option');
     $(document).off('change', '#ss-entry-modal-site-branch');
@@ -2737,6 +2740,33 @@ const ShifterSync = (function() {
         closeModal('entry');
       } catch (error) {
         alert(error && error.message ? error.message : '\u4ee3\u52d9\u8981\u8acb\u306b\u5931\u6557\u3057\u307e\u3057\u305f');
+      } finally {
+        button.prop('disabled', false);
+      }
+    });
+
+    $(document).on('click', '.ss-entry-assist-search-btn', async function() {
+      const button = $(this);
+      const day = String(button.attr('data-day') || '');
+      const entryId = String(button.attr('data-entry-id') || '');
+      if (!day || !entryId || typeof state.onEntryAssist !== 'function') {
+        return;
+      }
+      // 入力途中のオプション・コメントを先に確定しておく。差し替え後もそのまま残す。
+      saveEntryFromModal();
+      if (!$('#ss-entry-modal').hasClass('ss-hidden')) {
+        // 入力エラーでモーダルが閉じていない（保存できていない）ので何もしない。
+        return;
+      }
+      const entry = getDayEntries(day).find((item) => item.id === entryId);
+      if (!entry) {
+        return;
+      }
+      button.prop('disabled', true);
+      try {
+        await Promise.resolve(state.onEntryAssist({ day, entryId, entry: cloneEntry(entry, false) }));
+      } catch (error) {
+        alert(error && error.message ? error.message : 'アシストを開けませんでした');
       } finally {
         button.prop('disabled', false);
       }
@@ -3328,6 +3358,12 @@ const ShifterSync = (function() {
       ? ([entry.substitute_helper_name || '', formatSharedTimestamp(entry.substitute_helped_at)].filter(Boolean).join(' / ') || '\u672a\u8a18\u9332')
       : '\u672a\u89e3\u6c7a';
     const canRequestSubstitute = false;
+    // エントリ詳細からのアシスト（候補サーチ）。仮の名前で入れた行を、
+    // コメント・オプション・並び順を保ったまま実在する人へ差し替えるための入口。
+    const canAssistEntry = state.entryAssistEnabled
+      && isSceneMode()
+      && !syncedEntry
+      && typeof state.onEntryAssist === 'function';
     const canRequestLeaveChange = !state.editable
       && state.leaveChangeRequestEnabled
       && isPersonMode()
@@ -3490,6 +3526,12 @@ const ShifterSync = (function() {
           >
           <div id="ss-entry-modal-selected-note" class="ss-selected-note${entry.employee_number || selectedSite.site_id ? '' : ' ss-hidden'}">${entry.employee_number ? `選択中: ${escapeHtml(parsed.name)} / ${escapeHtml(entry.employee_number)}` : selectedSite.site_id ? `選択中: ${escapeHtml([selectedSite.site_id, selectedSite.site_name].filter(Boolean).join(' / '))}` : ''}</div>
           <div id="ss-entry-modal-candidate-panel" class="ss-candidate-panel ss-hidden" data-search-kind="modal"></div>
+          ${canAssistEntry ? `
+            <div class="ss-entry-assist-action">
+              <button type="button" class="btn-secondary ss-entry-assist-search-btn" data-day="${day}" data-entry-id="${escapeHtml(entry.id)}">アシストで候補を探す</button>
+              <div class="ss-detail-empty-text">オプション・コメント・並び順はそのままで、名前だけを候補者へ差し替えられます。今の内容を保存してからアシストを開きます。</div>
+            </div>
+          ` : ''}
         </div>
         <div class="ss-detail-field">
           <label class="ss-detail-label" for="ss-entry-modal-option">\u30aa\u30d7\u30b7\u30e7\u30f3</label>
@@ -3869,6 +3911,8 @@ const ShifterSync = (function() {
     state.editable = Object.prototype.hasOwnProperty.call(options, 'editable') ? !!options.editable : true;
     state.substituteRequestEnabled = !!options.substituteRequestEnabled;
     state.onSubstituteRequest = typeof options.onSubstituteRequest === 'function' ? options.onSubstituteRequest : null;
+    state.entryAssistEnabled = !!options.entryAssistEnabled;
+    state.onEntryAssist = typeof options.onEntryAssist === 'function' ? options.onEntryAssist : null;
     state.leaveChangeRequestEnabled = !!options.leaveChangeRequestEnabled;
     state.onLeaveChangeRequest = typeof options.onLeaveChangeRequest === 'function' ? options.onLeaveChangeRequest : null;
     state.leaveChangePendingRequestEntryIds = new Set(

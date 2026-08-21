@@ -11705,78 +11705,6 @@ def _save_large_month_in_project(
     return merged
 
 
-def _assert_no_scene_month_conflicts(
-    project: dict[str, Any],
-    year: int,
-    month: int,
-    entries_per_day: dict[str, Any],
-) -> None:
-    """現場シフトを保存する際、同じ管理者の別現場との同日重複を拒否する。"""
-    if project.get("mode") != "scene":
-        return
-    month_key = _month_key(year, month)
-    owner_user_id = str(project.get("owner_user_id") or "").strip()
-    project_id = str(project.get("id") or "").strip()
-    conflicts: list[dict[str, str]] = []
-    for other_project in _iter_project_summaries_for_month(month_key, mode="scene"):
-        if not other_project or str(other_project.get("id") or "").strip() == project_id:
-            continue
-        if owner_user_id and str(other_project.get("owner_user_id") or "").strip() != owner_user_id:
-            continue
-        other_month = (other_project.get("months") or {}).get(month_key)
-        if not isinstance(other_month, dict):
-            continue
-        other_title = str(other_project.get("title") or "").strip() or "名称未設定"
-        for day_key, local_entries in (entries_per_day or {}).items():
-            other_entries = (other_month.get("entries_per_day") or {}).get(str(day_key), [])
-            if not isinstance(local_entries, list) or not isinstance(other_entries, list):
-                continue
-            for local_entry in local_entries:
-                if not isinstance(local_entry, dict) or str(local_entry.get("sync_source_type") or "").strip():
-                    continue
-                local_option, local_name = parse_entry_value(local_entry.get("value") or "")
-                local_number = str(local_entry.get("employee_number") or "").strip()
-                for other_entry in other_entries:
-                    if not isinstance(other_entry, dict) or str(other_entry.get("sync_source_type") or "").strip():
-                        continue
-                    other_option, other_name = parse_entry_value(other_entry.get("value") or "")
-                    if not _assist_candidate_matches_scene_entry(
-                        candidate_name=str(local_name or "").strip(),
-                        candidate_employee_number=local_number,
-                        entry_name=str(other_name or "").strip(),
-                        entry_employee_number=str(other_entry.get("employee_number") or "").strip(),
-                    ):
-                        continue
-                    if not is_duplicate_by_rules(
-                        str(local_option or "").strip() or None,
-                        str(other_option or "").strip() or None,
-                    ):
-                        continue
-                    conflicts.append(
-                        {
-                            "day": str(day_key),
-                            "name": str(local_name or "").strip() or local_number,
-                            "project_title": other_title,
-                            "shift_label": _assist_shift_label(other_option),
-                        }
-                    )
-    if not conflicts:
-        return
-    unique: list[dict[str, str]] = []
-    seen: set[tuple[str, str, str, str]] = set()
-    for item in conflicts:
-        key = (item["day"], item["name"], item["project_title"], item["shift_label"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(item)
-    details = " / ".join(
-        f"{item['day']}日 {item['name']}（{item['project_title']}・{item['shift_label']}）"
-        for item in unique[:5]
-    )
-    suffix = f" ほか{len(unique) - 5}件" if len(unique) > 5 else ""
-    raise CloudShiftError(f"同日の別現場シフトと重複しています: {details}{suffix}", 409)
-
-
 def _save_month_in_project(
     project: dict[str, Any],
     year: int,
@@ -11817,7 +11745,6 @@ def _save_month_in_project(
         "entries_per_day": prepared_entries,
     }
     merged = _merge_month_payload(current_month, incoming_month, base_month)
-    _assert_no_scene_month_conflicts(project, year, month, merged.get("entries_per_day") or {})
     merged["draft_entries_per_day"] = _normalize_entries(merged.get("entries_per_day"), year, month)
     changes = _describe_month_changes(current_month, merged)
     decision_changes = _finalize_approved_leave_change_requests(

@@ -2394,7 +2394,7 @@ def test_master_shift_targets_can_be_edited_later(tmp_path):
     assert master["people_count"] == 0
 
 
-def test_scene_save_rejects_same_day_conflict_from_another_scene_book(tmp_path):
+def test_scene_save_allows_same_day_conflict_and_only_assist_search_flags_it(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
 
@@ -2442,10 +2442,35 @@ def test_scene_save_rejects_same_day_conflict_from_another_scene_book(tmp_path):
         },
     )
 
+    # 編集画面からの保存は、同日に同じ名前が別のシフト帳へ入っていても通す。
+    # （実在しない「代務」などの仮入力を保存できなくなるため）
     assert alpha_save.status_code == 200
-    assert beta_save.status_code == 409
-    assert "Beta Team" not in beta_save.get_json()["error"]
-    assert "Alpha Team・午前" in beta_save.get_json()["error"]
+    assert beta_save.status_code == 200
+    assert beta_save.get_json()["month"]["entries_per_day"]["1"][0]["value"] == "!E!Alice"
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{beta_id}/assist/rules",
+        json={
+            "weekday": 2,
+            "shift_key": "E",
+            "assignments": [
+                {"candidate_name": "Alice", "employee_number": "", "role_type": "normal", "priority": 1}
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+
+    # 重複の判定はアシストの候補サーチだけで行う。
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{beta_id}/assist/search",
+        json={"target_date": "2026-04-01", "shift_key": "E"},
+    )
+    assert search_response.status_code == 200
+    candidate = next(
+        item for item in search_response.get_json()["results"] if item["name"] == "Alice"
+    )
+    assert candidate["has_scene_conflict"] is True
+    assert candidate["scene_conflict_site_names"] == ["Alpha Team"]
 
 
 def test_spot_search_separates_leave_options_from_available_people_and_dedupes_synced_entries(tmp_path):
@@ -2643,6 +2668,17 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "has_scene_conflict" in script
     assert "scene_conflict_site_names" in script
     assert "同日勤務あり" in script
+    assert "ss-entry-assist-search-btn" in ss_common_js
+    assert "アシストで候補を探す" in ss_common_js
+    assert "state.entryAssistEnabled" in ss_common_js
+    assert "state.onEntryAssist" in ss_common_js
+    assert ".ss-entry-assist-action" in ss_common_css
+    assert "onEntryAssist: entryAssistEnabled ? openAssistSearchForEntry : null" in script
+    assert "async function openAssistSearchForEntry" in script
+    assert "function assistTargetEntryIdFromContext" in script
+    assert "function replaceAssistTargetEntryWithCandidate" in script
+    assert "と入れ替える" in script
+    assert "エントリの名前を候補者に差し替えました" in script
     assert "勤務中:" in script
     assert "経験済み現場（代務）" in script
     assert "経験済み現場（研修）" in script
