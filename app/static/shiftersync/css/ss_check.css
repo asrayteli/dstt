@@ -524,6 +524,20 @@ h1.title {
     border: 1px solid #fdba74;
 }
 
+.leave-work-conflict {
+    background: #fffbeb !important;
+    color: #b45309 !important;
+    font-weight: bold;
+    border: 1px solid #f59e0b;
+}
+
+.vehicle-conflict {
+    background: #f5f3ff !important;
+    color: #6d28d9 !important;
+    font-weight: bold;
+    border: 1px solid #a78bfa;
+}
+
 /* 凡例 */
 .legend {
     margin-top: 20px;

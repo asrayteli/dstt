@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import secrets
-from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -31,50 +30,27 @@ from werkzeug.utils import secure_filename
 
 try:
     from .shiftersync_format import (
-        LEAVE_OPTION_MAPPINGS,
         OPTION_MAPPINGS,
         entry_display_text,
-        entry_name_for_comparison,
-        entry_option_and_name,
         entry_shift_time_label,
         parse_csv_text,
     )
+    from .shiftersync_check import compare_shift_payloads
     from .japan_holidays import JAPAN_HOLIDAYS
 except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
-        LEAVE_OPTION_MAPPINGS,
         OPTION_MAPPINGS,
         entry_display_text,
-        entry_name_for_comparison,
-        entry_option_and_name,
         entry_shift_time_label,
         parse_csv_text,
     )
+    from app.tools.shiftersync_check import compare_shift_payloads  # type: ignore
     from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
 
 
 shiftersync_bp = Blueprint("shiftersync", __name__, url_prefix="/tools/shiftersync")
 
 ARTIFACT_SESSION_KEY = "shiftersync_calendar_artifacts"
-NUMBER_CAR_OPTIONS = {"N1", "N2", "N3", "N4", "N5"}
-TEMPORARY_OPTION = "TEMP"
-TIME_CONFLICT_RULES = {
-    ("A", "P"): False,
-    ("A", "E"): True,
-    ("A", "L"): False,
-    ("P", "E"): False,
-    ("P", "L"): True,
-    ("E", "L"): False,
-}
-# 上表は時系列順(A午前→P午後→E早番→L遅番)でキーを書くが、照合側は
-# tuple(sorted(...)) でアルファベット順に正規化して引く。両順序が食い違うキー
-# （例 ("P","L") → sorted=("L","P")）は辞書ミスでフォールバックに落ち、本来の
-# 衝突判定(True)を取りこぼす。照合用にキーをソート正規化した表を持つ。
-_TIME_CONFLICT_LOOKUP = {
-    tuple(sorted(pair)): value for pair, value in TIME_CONFLICT_RULES.items()
-}
-VEHICLE_OPTIONS = {"M", "C", "O", "W", "V"}
-LEAVE_OPTION_KEYS = set(LEAVE_OPTION_MAPPINGS.keys())
 JAPAN_HOLIDAYS_SET = set(JAPAN_HOLIDAYS)
 JST = timezone(timedelta(hours=9))
 
@@ -147,37 +123,6 @@ def upload():
     return render_template("ss_upload.html", shiftersync_holidays=sorted(JAPAN_HOLIDAYS_SET))
 
 
-def _is_duplicate_by_rules(
-    option1: str | None, option2: str | None, *, same_site: bool = False
-) -> bool:
-    if option1 in LEAVE_OPTION_KEYS or option2 in LEAVE_OPTION_KEYS:
-        return False
-
-    if option1 == TEMPORARY_OPTION or option2 == TEMPORARY_OPTION:
-        return same_site and option1 == option2 == TEMPORARY_OPTION
-
-    if option1 is None or option2 is None:
-        return True
-
-    if option1 in NUMBER_CAR_OPTIONS or option2 in NUMBER_CAR_OPTIONS:
-        return option1 in NUMBER_CAR_OPTIONS and option1 == option2
-
-    if option1 in {"A", "P", "E", "L"} or option2 in {"A", "P", "E", "L"}:
-        if option1 not in {"A", "P", "E", "L"} or option2 not in {"A", "P", "E", "L"}:
-            return False
-        key = tuple(sorted((option1, option2)))
-        return _TIME_CONFLICT_LOOKUP.get(key, option1 == option2)
-
-    if option1 in VEHICLE_OPTIONS and option2 in VEHICLE_OPTIONS:
-        if option1 == "V" or option2 == "V":
-            return True
-        if option1 == option2:
-            return True
-        return False
-
-    return option1 == option2
-
-
 @shiftersync_bp.route("/check", methods=["GET", "POST"])
 def check():
     if request.method == "GET":
@@ -189,12 +134,7 @@ def check():
     if len(files) > 50:
         return jsonify({"error": "CSV は 50 ファイルまで比較できます"})
 
-    mode = None
-    year = None
-    month = None
-    file_targets: list[str] = []
-    file_capacities: list[int | None] = []
-    shift_data = defaultdict(lambda: [[] for _ in range(len(files))])
+    payloads: list[dict[str, Any]] = []
 
     for file_index, file in enumerate(files):
         filename = secure_filename(file.filename or f"file_{file_index + 1}.csv")
@@ -203,107 +143,12 @@ def check():
         except Exception as exc:
             return jsonify({"error": f"{filename} の読み込みに失敗しました: {exc}"})
 
-        file_mode = payload["mode"]
-        file_year = payload["year"]
-        file_month = payload["month"]
-        if mode is None:
-            mode, year, month = file_mode, file_year, file_month
-        elif (mode, year, month) != (file_mode, file_year, file_month):
-            return jsonify({"error": f"{filename} は他の CSV とモードまたは年月が一致していません"})
+        payloads.append({**payload, "label": payload.get("title") or filename})
 
-        file_targets.append(payload["title"])
-        file_capacities.append(payload["required_capacity"] or None)
-
-        for day_key, entries in payload["entries_per_day"].items():
-            day = int(day_key)
-            normalized_entries = []
-            for entry in entries:
-                option_key, name, comment = entry_option_and_name(entry)
-                normalized_entries.append(
-                    {
-                        "original": entry["value"],
-                        "display": entry_display_text(entry),
-                        "comparison": entry_name_for_comparison(entry),
-                        "option": option_key,
-                        "name": name,
-                        "comment": comment,
-                    }
-                )
-            shift_data[day][file_index].extend(normalized_entries)
-
-    if mode is None or year is None or month is None:
-        return jsonify({"error": "比較できる CSV がありません"})
-
-    conflicts = []
-    same_site_conflicts = []
-
-    for day, per_file_entries in shift_data.items():
-        for file_index, entries in enumerate(per_file_entries):
-            same_site_grouped = defaultdict(list)
-            for entry in entries:
-                if entry["name"]:
-                    same_site_grouped[entry["name"]].append(entry)
-            for items in same_site_grouped.values():
-                if len(items) < 2:
-                    continue
-                for left_index, left in enumerate(items):
-                    for right in items[left_index + 1 :]:
-                        if _is_duplicate_by_rules(
-                            left["option"], right["option"], same_site=True
-                        ):
-                            same_site_conflicts.append(
-                                {"date": day, "entry": left["original"], "file_index": file_index}
-                            )
-                            same_site_conflicts.append(
-                                {"date": day, "entry": right["original"], "file_index": file_index}
-                            )
-
-        grouped = defaultdict(list)
-        for file_index, entries in enumerate(per_file_entries):
-            for entry in entries:
-                if entry["name"]:
-                    grouped[entry["name"]].append({"file_index": file_index, "entry": entry})
-
-        for items in grouped.values():
-            if len(items) < 2:
-                continue
-            for left_index, left in enumerate(items):
-                for right in items[left_index + 1 :]:
-                    if left["file_index"] == right["file_index"]:
-                        continue
-                    if _is_duplicate_by_rules(left["entry"]["option"], right["entry"]["option"]):
-                        conflicts.append({"date": day, "entry": left["entry"]["original"]})
-                        conflicts.append({"date": day, "entry": right["entry"]["original"]})
-
-    conflicts = list({f'{item["date"]}-{item["entry"]}': item for item in conflicts}.values())
-    same_site_conflicts = list(
-        {
-            f'{item["date"]}-{item["entry"]}-{item["file_index"]}': item
-            for item in same_site_conflicts
-        }.values()
-    )
-
-    all_dates = list(range(1, __import__("calendar").monthrange(year, month)[1] + 1))
-    matrix = {
-        day: shift_data.get(day, [[] for _ in range(len(files))])
-        for day in all_dates
-    }
-
-    return jsonify(
-        {
-            "mode": mode,
-            "year": year,
-            "month": month,
-            "targets": file_targets,
-            "capacities": file_capacities,
-            "dates": all_dates,
-            "matrix": matrix,
-            "conflicts": conflicts,
-            "same_site_conflicts": same_site_conflicts,
-            "option_mappings": OPTION_MAPPINGS,
-            "total_files": len(files),
-        }
-    )
+    try:
+        return jsonify(compare_shift_payloads(payloads))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)})
 
 
 @shiftersync_bp.route("/calendar", methods=["GET", "POST"])

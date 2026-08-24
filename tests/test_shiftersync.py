@@ -102,11 +102,11 @@ def test_check_ignores_leave_entries_in_all_conflict_checks(tmp_path):
     assert payload["same_site_conflicts"] == []
 
 
-def test_check_numbered_vehicle_conflicts_only_with_same_number(tmp_path):
+def test_check_separates_person_and_vehicle_conflicts(tmp_path):
     _, client = _build_client(tmp_path)
-    csv_a = "scene,2026,4,Team A\n譌･莉・迴ｾ蝣ｴ\n1,!N1!Alice,!N2!Alice,!N1!Alice\n"
-    csv_b = "scene,2026,4,Team B\n譌･莉・迴ｾ蝣ｴ\n1,!N3!Alice\n"
-    csv_c = "scene,2026,4,Team C\n譌･莉・迴ｾ蝣ｴ\n1,!N1!Alice\n"
+    csv_a = "scene,2026,4,Team A\n日付,現場\n1,!N1!Alice,!N2!Alice,!N1!Bob\n"
+    csv_b = "scene,2026,4,Team B\n日付,現場\n1,!N3!Alice\n"
+    csv_c = "scene,2026,4,Team C\n日付,現場\n1,!N1!Alice\n"
 
     response = client.post(
         "/tools/shiftersync/check",
@@ -122,14 +122,17 @@ def test_check_numbered_vehicle_conflicts_only_with_same_number(tmp_path):
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert sorted(item["entry"] for item in payload["same_site_conflicts"]) == ["!N1!Alice"]
-    assert sorted(item["entry"] for item in payload["conflicts"]) == ["!N1!Alice"]
+    # 号車だけの旧データは時間帯未設定（終日）の勤務なので、人の重複になる。
+    assert sorted(item["entry"] for item in payload["same_site_conflicts"]) == ["!N1!Alice", "!N2!Alice"]
+    assert sorted(item["entry"] for item in payload["conflicts"]) == ["!N1!Alice", "!N2!Alice", "!N3!Alice"]
+    # 車両重複は同一現場・同一号車だけを別枠で返す。
+    assert sorted(item["entry"] for item in payload["vehicle_conflicts"]) == ["!N1!Alice", "!N1!Bob"]
 
 
 def test_check_temporary_option_conflicts_only_within_same_site(tmp_path):
     _, client = _build_client(tmp_path)
-    csv_a = "scene,2026,4,Team A\n譌･莉・迴ｾ蝣ｴ\n1,!TEMP!Alice,!TEMP!Alice\n"
-    csv_b = "scene,2026,4,Team B\n譌･莉・迴ｾ蝣ｴ\n1,!TEMP!Alice\n"
+    csv_a = "scene,2026,4,Team A\n日付,現場\n1,!TEMP!Alice,!TEMP!Alice\n"
+    csv_b = "scene,2026,4,Team B\n日付,現場\n1,!TEMP!Alice\n"
 
     response = client.post(
         "/tools/shiftersync/check",
@@ -150,46 +153,32 @@ def test_check_temporary_option_conflicts_only_within_same_site(tmp_path):
 
 
 def test_time_conflict_rules_are_order_independent():
-    """時間オプションの衝突判定が引数順に依存せず、定義表どおり評価される。
+    """午前系／午後系の実装が既存の対応表と両方向で一致する。"""
+    from app.tools.shiftersync_check import TIME_CONFLICT_RULES, person_conflicts
 
-    回帰: TIME_CONFLICT_RULES のキーは時系列順(A→P→E→L)で書かれているが、
-    照合は tuple(sorted(...)) でアルファベット順に正規化される。両順序が食い違う
-    ("P","L") のようなキーが辞書ミスでフォールバックに落ち、本来の衝突(True)を
-    取りこぼしていた（午後×遅番の二重出勤が衝突として検出されない）。"""
-    from app.tools.shiftersync_check import is_duplicate_by_rules
+    def conflicts(a, b):
+        return person_conflicts({"time": a}, {"time": b})
 
-    # 表に True と定義されたペアは、どちらの引数順でも衝突になること。
-    assert is_duplicate_by_rules("P", "L") is True  # 午後 × 遅番（旧バグで False）
-    assert is_duplicate_by_rules("L", "P") is True
-    assert is_duplicate_by_rules("A", "E") is True  # 午前 × 早番
-    assert is_duplicate_by_rules("E", "A") is True
-
-    # 表に False と定義されたペアは、どちらの引数順でも非衝突のままであること。
-    for a, b in (("A", "P"), ("A", "L"), ("P", "E"), ("E", "L")):
-        assert is_duplicate_by_rules(a, b) is False, (a, b)
-        assert is_duplicate_by_rules(b, a) is False, (b, a)
+    for (left, right), expected in TIME_CONFLICT_RULES.items():
+        assert conflicts(left, right) is expected, (left, right)
+        assert conflicts(right, left) is expected, (right, left)
 
     # 同一オプション同士は衝突。
     for opt in ("A", "P", "E", "L"):
-        assert is_duplicate_by_rules(opt, opt) is True, opt
+        assert conflicts(opt, opt) is True, opt
 
 
-def test_shiftersync_local_rules_match_check_module():
-    """shiftersync.py の重複コピーと正本 shiftersync_check.py が同じ結果を返す。"""
-    from app.tools.shiftersync import _is_duplicate_by_rules as local_rules
-    from app.tools.shiftersync_check import is_duplicate_by_rules as canonical_rules
+def test_shiftersync_duplicate_rules_have_single_canonical_implementation():
+    """shiftersync.py に重複したローカル実装を再導入しない。"""
+    from app.tools import shiftersync
 
-    options = ["A", "P", "E", "L", "TEMP", "N1", "N2", "V", "M", None]
-    for a in options:
-        for b in options:
-            assert local_rules(a, b) == canonical_rules(a, b), (a, b)
-            assert local_rules(a, b, same_site=True) == canonical_rules(a, b, same_site=True), (a, b)
+    assert not hasattr(shiftersync, "_is_duplicate_by_rules")
 
 
 def test_check_afternoon_and_late_shift_conflict_same_day(tmp_path):
     """同一人物が同日に午後(P)と遅番(L)を持つと衝突として検出される（回帰）。"""
     _, client = _build_client(tmp_path)
-    csv_a = "scene,2026,4,Team A\n譌･莉・迴ｾ蝣ｴ\n1,!P!Alice,!L!Alice\n"
+    csv_a = "scene,2026,4,Team A\n日付,現場\n1,!P!Alice,!L!Alice\n"
 
     response = client.post(
         "/tools/shiftersync/check",

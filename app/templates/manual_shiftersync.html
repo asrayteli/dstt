@@ -591,9 +591,9 @@
       <div class="csm-step-badge">2</div>
       <div class="csm-step-body">
         <div class="csm-step-title">オプション（勤務の種類）を選ぶ
-          <span class="csm-tag csm-tag-blue">時間帯 / 車両 / 役割 / 休暇</span>
+          <span class="csm-tag csm-tag-blue">時間帯 / 車種 / 号車 / 休暇 / 第二オプション</span>
         </div>
-        <p class="csm-step-text">勤務の内容はオプションで表します。時間帯・車両・役割・休暇の 4 グループがあります。</p>
+        <p class="csm-step-text">勤務の内容は独立した「時間帯・車種・号車」で表します。車種と号車は同時に選べます。休暇を選ぶと勤務側の3項目は外れ、代務・研修は別枠の第二オプションとして残ります。</p>
         <hr class="csm-divider">
         <div class="csm-card" style="margin:0">
           <div class="csm-card-title" style="justify-content:space-between">
@@ -615,7 +615,7 @@
               </ul>
             </div>
             <div>
-              <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">車両</div>
+              <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">車種・号車</div>
               <ul class="csm-ul">
                 <li><span class="csm-key">M</span>マイクロ <span class="csm-key">C</span>中型 <span class="csm-key">O</span>大型</li>
                 <li><span class="csm-key">W</span>ワゴン <span class="csm-key">V</span>役員車両</li>
@@ -932,13 +932,13 @@
         <img src="{{ url_for('static', filename='cloudshift/manual/11_assist_search.png') }}" alt="アシストの候補検索（サーチ）" loading="lazy">
         <figcaption>「サーチ」タブの候補検索。対象日とオプションを指定して「候補を検索」すると、右側に候補者が点数付きで一覧されます（1 日・1 枠ぶんの候補提案）。</figcaption>
       </figure>
-      <div class="csm-note" style="margin-top:10px">📌 サーチの候補に出る「<strong>同日競合</strong>」は、<strong>アシストの候補検索だけ</strong>の事前チェックです。<strong>同じ営業所の現場シフト帳・個人シフト帳をすべて横断</strong>して、その日にすでに入っている人を調べます（自分が所有していないシフト帳も対象です）。競合した候補は追加できません。<strong>編集画面での入力・保存は止めません</strong>。「代務」など仮の名前を複数のシフト帳へ同じ日に入れても保存できます。入力済みの重なりを確かめたいときは「重複チェック」タブを使ってください。</div>
+      <div class="csm-note" style="margin-top:10px">📌 サーチの候補に出る「<strong>同日競合</strong>」は、<strong>アシストの候補検索だけ</strong>の事前チェックです。<strong>同じ営業所の現場・個人・大規模シフト帳をすべて横断</strong>して、その日にすでに入っている人を調べます（自分が所有していないシフト帳も対象です）。人の重複は<strong>時間帯だけ</strong>で判定し、時間帯未設定と大規模シフトの勤務コードは終日扱いです。競合した候補は追加できません。<strong>編集画面での入力・保存は止めません</strong>。「代務」など仮の名前を複数のシフト帳へ同じ日に入れても保存できます。入力済みの重なりを確かめたいときは「重複チェック」タブを使ってください。</div>
       <table class="csm-opt-table" style="margin-top:10px">
         <thead><tr><th style="width:190px">同日競合で見るもの</th><th>内容</th></tr></thead>
         <tbody>
-          <tr><td>範囲</td><td>同じ営業所で作られた<strong>現場シフト帳と個人シフト帳</strong>の対象月・対象日。所有者は問いません。</td></tr>
+          <tr><td>範囲</td><td>同じ営業所で作られた<strong>現場・個人・大規模シフト帳</strong>の対象月・対象日。所有者は問いません。</td></tr>
           <tr><td>人物の同定</td><td>両方に社員IDがあれば社員IDで、無ければ氏名で照合します。個人シフト帳はシフト帳自体が人物なので、シフト帳の社員ID・名前で照合します。</td></tr>
-          <tr><td>数えないもの</td><td>他のシフト帳から<strong>同期でコピーされた行</strong>（元のシフト帳側で1回だけ数えます）と、<strong>休暇どうし</strong>の重なり。大規模シフト帳・要代務シフト帳は対象外です。</td></tr>
+          <tr><td>数えないもの</td><td>他のシフト帳から<strong>同期でコピーされた鏡像</strong>は元帳側で1回だけ数えます。<strong>休暇どうし</strong>の重なりは人の重複にしません。未解決の要代務依頼は実勤務ではないため対象外です。</td></tr>
         </tbody>
       </table>
     </div>
@@ -1138,7 +1138,7 @@
           <div class="csm-flow-note">重なり・人数不足を一覧で確認</div>
         </div>
       </div>
-      <div class="csm-note" style="margin-top:10px">📎 休暇どうしは重複になりません。代務・研修は終日の勤務として扱われ、同じ日の他の勤務と重なります。臨時便（TEMP）は同じ現場で臨時便どうしのときだけ重複とみなします。</div>
+      <div class="csm-note" style="margin-top:10px">📎 人の重複は時間帯だけで判定し、車種・号車・代務・研修は使いません。時間帯未設定は終日扱いです。休暇と勤務が同じ日は「人の重複」と別枠で警告し、同一現場・同一号車で時間帯が重なる場合は「車両の重複」として警告します。臨時便（TEMP）は同じ現場で臨時便どうしのときだけ重複します。</div>
     </div>
   </section>
 
@@ -1607,12 +1607,13 @@
       <thead><tr><th style="width:110px">グループ</th><th>記号と意味</th></tr></thead>
       <tbody>
         <tr><td>時間帯</td><td><span class="csm-key">A</span>午前 <span class="csm-key">P</span>午後 <span class="csm-key">E</span>早番 <span class="csm-key">L</span>遅番 <span class="csm-key">TEMP</span>臨時便</td></tr>
-        <tr><td>車両</td><td><span class="csm-key">M</span>マイクロ <span class="csm-key">C</span>中型 <span class="csm-key">O</span>大型 <span class="csm-key">W</span>ワゴン <span class="csm-key">V</span>役員車両 <span class="csm-key">N1</span>〜<span class="csm-key">N5</span>1〜5号車</td></tr>
+        <tr><td>車種</td><td><span class="csm-key">M</span>マイクロ <span class="csm-key">C</span>中型 <span class="csm-key">O</span>大型 <span class="csm-key">W</span>ワゴン <span class="csm-key">V</span>役員車両</td></tr>
+        <tr><td>号車</td><td><span class="csm-key">N1</span>〜<span class="csm-key">N5</span>1〜5号車。車種と同時に指定できます。</td></tr>
         <tr><td>役割<br>（第二オプション）</td><td><span class="csm-key">代務</span>一人で実際に勤務した＝実績扱い ／ <span class="csm-key">研修</span>教わった段階＝実績より一段低い。付けると経験が自動登録されます。</td></tr>
         <tr><td>休暇</td><td>有休・代休・公休・慶弔休暇・介護休暇・リフレッシュ休暇・その他</td></tr>
       </tbody>
     </table>
-    <div class="csm-note" style="margin-top:12px">休暇どうしは重複になりません。代務・研修は終日の勤務として扱われ、同じ日の他の勤務（時間帯・車両・名前だけの予定など）と重なります。臨時便（TEMP）は、同じ現場で臨時便どうしのときだけ重複とみなします。</div>
+    <div class="csm-note" style="margin-top:12px">人の重複は時間帯だけで判定します。車種・号車・代務・研修は人の判定には使いません。時間帯なしは終日扱いです。休暇と勤務の同日は別枠警告、同一現場・同一号車で時間帯が重なる場合は車両の重複として警告します。臨時便（TEMP）は、同じ現場で臨時便どうしのときだけ重複します。</div>
     <div style="text-align:right;margin-top:16px">
       <button class="csm-popup-btn" onclick="closeModal('modalOptions')">閉じる</button>
     </div>

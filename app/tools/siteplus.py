@@ -29,10 +29,12 @@ except ImportError:
 siteplus_bp = Blueprint("siteplus", __name__, url_prefix="/tools/siteplus")
 
 PENDING_OPTION_KEY = "PENDING"
-VEHICLE_OPTION_KEYS = ("M", "C", "O", "W", "V", "N1", "N2", "N3", "N4", "N5")
+VEHICLE_OPTION_KEYS = ("M", "C", "O", "W", "V")
+CAR_OPTION_KEYS = ("N1", "N2", "N3", "N4", "N5")
+BRANCH_OPTION_KEYS = VEHICLE_OPTION_KEYS + CAR_OPTION_KEYS
 VEHICLE_OPTION_LABELS = {
     key: SHIFT_OPTION_MAPPINGS.get(key, key)
-    for key in VEHICLE_OPTION_KEYS
+    for key in BRANCH_OPTION_KEYS
 }
 VEHICLE_OPTION_LABELS[PENDING_OPTION_KEY] = "保留"
 
@@ -732,7 +734,7 @@ def index():
 
 def _cloudshift_option_items() -> list[dict]:
     items = [{"key": PENDING_OPTION_KEY, "label": VEHICLE_OPTION_LABELS[PENDING_OPTION_KEY]}]
-    for key in VEHICLE_OPTION_KEYS:
+    for key in BRANCH_OPTION_KEYS:
         items.append({"key": key, "label": VEHICLE_OPTION_LABELS[key]})
     return items
 

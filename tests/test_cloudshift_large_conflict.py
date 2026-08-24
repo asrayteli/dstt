@@ -51,6 +51,17 @@ def test_same_book_pairs_are_ignored():
     assert cross_mode_conflicts([_rec("A", "0001", 3), _rec("A", "0001", 3)]) == []
 
 
+def test_same_synced_origin_is_counted_once_across_mirror_books():
+    mirrors = [
+        _rec("scene-A", "0001", 3, book_mode="scene", origin_key="master:3:entry-1"),
+        _rec("scene-B", "0001", 3, book_mode="scene", origin_key="master:3:entry-1"),
+        _rec("other", "0001", 3, book_mode="person", origin_key="other:3:entry-2"),
+    ]
+    conflicts = cross_mode_conflicts(mirrors)
+    assert len(conflicts) == 1
+    assert conflicts[0]["kind"] == "double_booking"
+
+
 def test_leave_plus_work_is_notice_but_two_leaves_are_not():
     notice = cross_mode_conflicts([_rec("A", "0001", 3, is_leave=True), _rec("B", "0001", 3)])
     assert len(notice) == 1 and notice[0]["kind"] == "leave_work"
@@ -98,6 +109,42 @@ def test_conflict_records_excludes_synced_mirror(tmp_path):
 
 
 # --- API 統合 ---
+
+def test_conflict_records_keep_master_and_resolved_substitute_mirrors(tmp_path):
+    module, client = _build_client(tmp_path)
+    project = {
+        "id": "S", "title": "scene", "mode": "scene",
+        "months": {"2026-07": {"year": 2026, "month": 7, "entries_per_day": {
+            "1": [
+                {
+                    "id": "master-copy", "value": "!A!Master Worker", "employee_number": "1001",
+                    "sync_source_type": "master_shift", "sync_source_project_id": "M",
+                    "sync_source_month_key": "2026-07", "sync_source_day": "1",
+                    "sync_source_entry_id": "master-entry",
+                },
+                {
+                    "id": "sub-copy", "value": "!P!Substitute Worker", "employee_number": "1002",
+                    "sync_source_type": "substitute_shift", "sync_source_project_id": "R",
+                    "sync_source_month_key": "2026-07", "sync_source_day": "1",
+                    "sync_source_entry_id": "sub-entry",
+                },
+                {
+                    "id": "ledger-copy", "value": "!A!Ledger Worker", "employee_number": "1003",
+                    "sync_source_type": "person_shift", "sync_source_project_id": "P",
+                    "sync_source_month_key": "2026-07", "sync_source_day": "1",
+                    "sync_source_entry_id": "person-entry",
+                },
+            ],
+        }}},
+    }
+    with client.application.app_context():
+        records = module._conflict_records_for_project(project, 2026, 7)
+    assert [record["employee_number"] for record in records] == ["1001", "1002"]
+    assert [record["origin_key"] for record in records] == [
+        "M:2026-07:1:master-entry",
+        "R:2026-07:1:sub-entry",
+    ]
+
 
 def _make_large_with_work(client):
     created = client.post(

@@ -72,10 +72,14 @@ SHIFT_OPTION_MAPPINGS = {
     "N5": "5\u53f7\u8eca",
 }
 
+TIME_OPTION_KEYS = {"A", "P", "E", "L", "TEMP"}
+VEHICLE_OPTION_KEYS = {"M", "C", "O", "W", "V"}
+CAR_OPTION_KEYS = {"N1", "N2", "N3", "N4", "N5"}
+
 # \u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u4ee3\u52d9 SUB\uff0f\u7814\u4fee TRAIN\uff09\u3002
 # \u901a\u5e38\u306e\u30b7\u30d5\u30c8\u30aa\u30d7\u30b7\u30e7\u30f3\u3068\u306f\u5225\u8ef8\u306e\u300c\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\u300d\u3068\u3057\u3066 entry \u306b\u4ed8\u4e0e\u3059\u308b\u3002
 # \u30a2\u30b7\u30b9\u30c8\u306e\u7d4c\u9a13\u6e08\u307f\u73fe\u5834\uff0f\u7814\u4fee\u8981\u73fe\u5834\u30fb\u81ea\u52d5\u4f5c\u6210\u30a8\u30f3\u30b8\u30f3\u30fb\u8868\u793a\u306b\u306e\u307f\u7528\u3044\u3001
-# \u91cd\u8907\u30c1\u30a7\u30c3\u30af\uff08is_duplicate_by_rules\uff09\u306b\u306f\u4e00\u5207\u5f71\u97ff\u3055\u305b\u306a\u3044\u3002
+# 第二オプションは重複チェックに一切影響させない。
 SECOND_OPTION_MAPPINGS = {
     "SUB": "\u4ee3\u52d9",
     "TRAIN": "\u7814\u4fee",
@@ -94,6 +98,7 @@ LEAVE_OPTION_MAPPINGS = {
     "REFRESH": "\u30ea\u30d5\u30ec\u30c3\u30b7\u30e5\u4f11\u6687",
     "OTHER": "\u305d\u306e\u4ed6",
 }
+LEAVE_OPTION_KEYS = set(LEAVE_OPTION_MAPPINGS)
 
 OPTION_MAPPINGS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS, **SECOND_OPTION_MAPPINGS}
 
@@ -291,6 +296,57 @@ def parse_entry_value(value: str) -> tuple[str | None, str]:
     return match.group(1), match.group(2)
 
 
+def _normalized_axis_option(value: Any, allowed: set[str]) -> str:
+    key = str(value or "").strip().upper()
+    return key if key in allowed else ""
+
+
+def entry_options(entry: Any) -> dict[str, str | None]:
+    """Return an entry's independent option axes.
+
+    Explicit axis fields win, including an explicitly empty field.  Legacy
+    ``!KEY!name`` values are used only for axes whose field is absent.  This
+    lets old months remain readable without guessing a missing time option.
+    """
+    source = entry if isinstance(entry, dict) else {"value": entry}
+    legacy_key, _name = parse_entry_value(str(source.get("value") or ""))
+    legacy_key = str(legacy_key or "").strip().upper()
+
+    def read_axis(snake: str, camel: str, allowed: set[str]) -> str | None:
+        if snake in source:
+            return _normalized_axis_option(source.get(snake), allowed) or None
+        if camel in source:
+            return _normalized_axis_option(source.get(camel), allowed) or None
+        return legacy_key if legacy_key in allowed else None
+
+    second = read_axis("second_option", "secondOption", SECOND_OPTION_KEYS)
+    return {
+        "time": read_axis("time_option", "timeOption", TIME_OPTION_KEYS),
+        "vehicle": read_axis("vehicle_option", "vehicleOption", VEHICLE_OPTION_KEYS),
+        "car": read_axis("car_option", "carOption", CAR_OPTION_KEYS),
+        "leave": read_axis("leave_option", "leaveOption", LEAVE_OPTION_KEYS),
+        "second": second,
+    }
+
+
+def entry_value_for_options(entry: Any, name: Any | None = None) -> str:
+    """Build the compatibility value using time > vehicle > car > leave."""
+    source = entry if isinstance(entry, dict) else {"value": entry}
+    legacy_key, legacy_name = parse_entry_value(str(source.get("value") or ""))
+    safe_name = str(legacy_name if name is None else name).strip()
+    if not safe_name:
+        return ""
+    options = entry_options(source)
+    key = next(
+        (options[axis] for axis in ("time", "vehicle", "car", "leave") if options[axis]),
+        None,
+    )
+    # Preserve unknown legacy extensions instead of silently discarding them.
+    if not key and legacy_key and str(legacy_key).upper() not in SECOND_OPTION_KEYS:
+        key = str(legacy_key).strip().upper()
+    return f"!{key}!{safe_name}" if key else safe_name
+
+
 def _normalize_site_branch_row_id(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -343,10 +399,30 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         ).strip().lower()
         if substitute_request_type not in {"scene", "person"}:
             substitute_request_type = ""
+        options = entry_options({**raw, "value": value, "second_option": second_option})
+        if options["leave"]:
+            options["time"] = None
+            options["vehicle"] = None
+            options["car"] = None
+        elif options["time"] or options["vehicle"] or options["car"]:
+            options["leave"] = None
+        value = entry_value_for_options(
+            {
+                "value": value,
+                "time_option": options["time"],
+                "vehicle_option": options["vehicle"],
+                "car_option": options["car"],
+                "leave_option": options["leave"],
+            }
+        )
         return {
             "id": str(raw.get("id") or generate_entry_id()),
             "value": value,
-            "second_option": second_option,
+            "time_option": options["time"] or "",
+            "vehicle_option": options["vehicle"] or "",
+            "car_option": options["car"] or "",
+            "leave_option": options["leave"] or "",
+            "second_option": options["second"] or "",
             "comment": str(raw.get("comment", "") or "").strip(),
             "employee_name": employee_name,
             "employee_number": employee_number,
@@ -414,10 +490,15 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
     if not value:
         return {}
     value, second_option = _split_second_option(value, "")
+    options = entry_options({"value": value, "second_option": second_option})
     return {
         "id": generate_entry_id(),
-        "value": value,
-        "second_option": second_option,
+        "value": entry_value_for_options(value),
+        "time_option": options["time"] or "",
+        "vehicle_option": options["vehicle"] or "",
+        "car_option": options["car"] or "",
+        "leave_option": options["leave"] or "",
+        "second_option": options["second"] or "",
         "comment": "",
         "employee_name": "",
         "employee_number": "",
@@ -997,9 +1078,15 @@ def entry_display_text(entry: Any, *, include_comment: bool = False, comment_lim
     normalized = normalize_entry(entry)
     if not normalized:
         return ""
-    option_key, name = parse_entry_value(normalized["value"])
-    head = f"{name} {OPTION_MAPPINGS.get(option_key, option_key)}" if option_key else name
-    second_option = normalize_second_option(normalized.get("second_option"))
+    _option_key, name = parse_entry_value(normalized["value"])
+    options = entry_options(normalized)
+    labels = [
+        OPTION_MAPPINGS.get(options[axis], options[axis])
+        for axis in ("time", "vehicle", "car", "leave")
+        if options[axis]
+    ]
+    head = " ".join([name, *labels])
+    second_option = options["second"] or ""
     if second_option:
         head = f"{head}［{SECOND_OPTION_MAPPINGS.get(second_option, second_option)}］"
     comment = normalized.get("comment", "").strip()
@@ -1048,11 +1135,4 @@ def entry_second_option(entry: Any) -> str:
     新形式の second_option フィールドを優先し、無ければ旧形式の値（`!SUB!名前`）
     からも導出する（保存前の生データでも判定できるようにする）。
     """
-    if isinstance(entry, dict):
-        direct = normalize_second_option(entry.get("second_option", entry.get("secondOption", "")))
-        if direct:
-            return direct
-        option_key, _name = parse_entry_value(str(entry.get("value") or ""))
-    else:
-        option_key, _name = parse_entry_value(str(entry or ""))
-    return normalize_second_option(option_key)
+    return str(entry_options(entry)["second"] or "")

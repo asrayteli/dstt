@@ -466,6 +466,68 @@ def test_person_book_leave_and_work(monkeypatch):
         [("E001", date(YEAR, MONTH, 4), "A")]
 
 
+def test_large_book_work_is_all_day_occupancy_and_leave_is_unavailable(monkeypatch):
+    """大規模元帳の勤務は終日占有、休暇は hard 不可日として自動作成へ渡す。"""
+    from app.services.cloudshift_large import default_large_config
+    from app.tools import cloudshift as cs
+
+    config = default_large_config()
+    config["members"] = [{
+        "id": "m1", "display_name": "佐藤", "employee_number": "E001",
+        "employee_name": "佐藤", "order": 10, "active": True, "column_type": "regular",
+    }]
+    config["codes"].extend([
+        {
+            "key": "A", "label": "通常勤務", "category": "work", "order": 10, "active": True,
+            "times": {kind: {"start": "09:00", "end": "18:00"} for kind in ("weekday", "saturday", "holiday")},
+            "color": "#dbeafe",
+        },
+        {
+            "key": "Y", "label": "有休", "category": "leave", "leave_kind": "paid",
+            "order": 20, "active": True, "color": "#fef3c7",
+        },
+    ])
+    large = {
+        "id": "L1", "mode": "large", "owner_user_id": "uX", "title": "大規模現場",
+        "large_config": config,
+        "months": {MONTH_KEY: {"year": YEAR, "month": MONTH, "entries_per_day": {
+            "8": [{"id": "l8", "member_id": "m1", "assignments": [{"code_key": "A", "source_type": "local"}]}],
+            "9": [{"id": "l9", "member_id": "m1", "assignments": [{"code_key": "Y", "source_type": "local"}]}],
+        }}},
+    }
+    monkeypatch.setattr(cs, "_iter_project_summaries_for_month", lambda month_key, mode=None: [base_project(), large])
+    warnings: list = []
+    external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
+    assert [(a.employee_number, a.date.day, a.shift_key, a.source_mode) for a in external] == [
+        ("E001", 8, "", "large"),
+    ]
+    assert [(u.employee_number, u.date.day, u.strength) for u in leave_days] == [
+        ("E001", 9, "hard"),
+    ]
+
+
+def test_master_mirror_counts_once_as_external_occupancy(monkeypatch):
+    """master 元帳は実勤務でないため、同期先 mirror を1回だけ占有として扱う。"""
+    from app.tools import cloudshift as cs
+
+    mirror = {
+        "id": "sync-1", "value": "!A!佐藤", "employee_number": "E001",
+        "sync_source_type": "master_shift", "sync_source_project_id": "M1",
+        "sync_source_month_key": MONTH_KEY, "sync_source_day": "10",
+        "sync_source_entry_id": "master-entry-1",
+    }
+    scene_a = _scene_project("S1", "u1", {"10": [mirror]}, title="現場A")
+    scene_b = _scene_project("S2", "u2", {"10": [{**mirror, "id": "sync-2"}]}, title="現場B")
+    monkeypatch.setattr(
+        cs,
+        "_iter_project_summaries_for_month",
+        lambda month_key, mode=None: [base_project(), scene_a, scene_b],
+    )
+    warnings: list = []
+    external, _leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
+    assert [(a.employee_number, a.date.day, a.shift_key) for a in external] == [("E001", 10, "A")]
+
+
 def test_unknown_leave_type_defaults_to_hard(monkeypatch):
     """ポリシー未定義の休暇種別も既定で hard（休みの日に配置しない）。"""
     from app.tools import leave_mgr

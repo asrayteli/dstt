@@ -182,6 +182,37 @@ const ShifterSync = (function() {
     return optionKey ? `!${optionKey}!${safeName}` : safeName;
   }
 
+  function entryAxes(entry) {
+    const source = entry && typeof entry === 'object' ? entry : { value: entry };
+    const legacy = String(parseEntryValue(source.value || '').optionKey || '').trim().toUpperCase();
+    const own = (snake, camel, allowed) => {
+      const hasSnake = Object.prototype.hasOwnProperty.call(source, snake);
+      const hasCamel = Object.prototype.hasOwnProperty.call(source, camel);
+      if (hasSnake || hasCamel) {
+        const key = String(hasSnake ? source[snake] || '' : source[camel] || '').trim().toUpperCase();
+        return allowed.includes(key) ? key : '';
+      }
+      return allowed.includes(legacy) ? legacy : '';
+    };
+    const axes = {
+      time_option: own('time_option', 'timeOption', shiftTimeOptionKeys),
+      vehicle_option: own('vehicle_option', 'vehicleOption', vehicleOptionKeys),
+      car_option: own('car_option', 'carOption', vehicleNumberOptionKeys),
+      leave_option: own('leave_option', 'leaveOption', leaveOptionKeys)
+    };
+    if (axes.leave_option) {
+      axes.time_option = '';
+      axes.vehicle_option = '';
+      axes.car_option = '';
+    }
+    return axes;
+  }
+
+  function formatEntryValueFromAxes(name, axes) {
+    const key = axes.time_option || axes.vehicle_option || axes.car_option || axes.leave_option || '';
+    return formatEntryValue(key, name);
+  }
+
   function normalizeSecondOption(value) {
     const key = String(value || '').trim().toUpperCase();
     return secondOptionKeys.includes(key) ? key : '';
@@ -489,9 +520,12 @@ const ShifterSync = (function() {
         return null;
       }
       const split = splitSecondOption(trimmed, '');
+      const axes = entryAxes({ value: split.value });
+      const parsed = parseEntryValue(split.value);
       return {
         id: makeEntryId(),
-        value: split.value,
+        value: formatEntryValueFromAxes(parsed.name, axes),
+        ...axes,
         second_option: split.secondOption,
         comment: '',
         employee_name: '',
@@ -541,10 +575,12 @@ const ShifterSync = (function() {
       return null;
     }
     const split = splitSecondOption(rawValue, entry.second_option || entry.secondOption || '');
-    const value = split.value;
+    const axes = entryAxes(Object.assign({}, entry, { value: split.value }));
+    const value = formatEntryValueFromAxes(parseEntryValue(split.value).name, axes);
     return {
       id: String(entry.id || makeEntryId()),
       value,
+      ...axes,
       second_option: split.secondOption,
       comment: String(entry.comment || '').trim(),
       employee_name: String(entry.employee_name || entry.employeeName || '').trim(),
@@ -599,6 +635,10 @@ const ShifterSync = (function() {
     return {
       id: withNewId ? makeEntryId() : normalized.id,
       value: normalized.value,
+      time_option: normalized.time_option || '',
+      vehicle_option: normalized.vehicle_option || '',
+      car_option: normalized.car_option || '',
+      leave_option: normalized.leave_option || '',
       second_option: normalized.second_option || '',
       comment: normalized.comment,
       employee_name: normalized.employee_name,
@@ -680,8 +720,33 @@ const ShifterSync = (function() {
     return state.selectedOptions[String(day)] || [];
   }
 
+  function optionAxisForKey(key) {
+    if (shiftTimeOptionKeys.includes(key)) return 'time';
+    if (vehicleOptionKeys.includes(key)) return 'vehicle';
+    if (vehicleNumberOptionKeys.includes(key)) return 'car';
+    if (leaveOptionKeys.includes(key)) return 'leave';
+    return '';
+  }
+
+  function axesFromSelectedOptions(options) {
+    const result = { time_option: '', vehicle_option: '', car_option: '', leave_option: '' };
+    (Array.isArray(options) ? options : []).forEach((key) => {
+      const axis = optionAxisForKey(key);
+      if (axis) result[`${axis}_option`] = key;
+    });
+    if (result.leave_option) {
+      result.time_option = '';
+      result.vehicle_option = '';
+      result.car_option = '';
+    }
+    return result;
+  }
+
   function setSelectedOptionsForDay(day, options) {
-    state.selectedOptions[String(day)] = Array.isArray(options) ? options.slice(0, 1) : [];
+    const axes = axesFromSelectedOptions(options);
+    state.selectedOptions[String(day)] = [
+      axes.time_option, axes.vehicle_option, axes.car_option, axes.leave_option
+    ].filter(Boolean);
   }
 
   function clearSelectedOptionsForDay(day) {
@@ -1609,6 +1674,10 @@ const ShifterSync = (function() {
       };
     }
     const parsed = parseEntryValue(normalized.value);
+    const axes = entryAxes(normalized);
+    const optionLabels = [axes.time_option, axes.vehicle_option, axes.car_option, axes.leave_option]
+      .filter(Boolean)
+      .map((key) => allOptionMappings[key] || key);
     const secondOptionLabel = normalized.second_option
       ? (secondOptionMappings[normalized.second_option] || normalized.second_option)
       : '';
@@ -1620,10 +1689,10 @@ const ShifterSync = (function() {
     let displayTitle;
     let titleTone = '';
     if (isPendingSubstituteRequest) {
-      displayTitle = parsed.optionKey ? `要請中 ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : '要請中';
+      displayTitle = optionLabels.length ? `要請中 ${optionLabels.join(' ')}` : '要請中';
       titleTone = 'substitute-pending';
     } else {
-      displayTitle = parsed.optionKey ? `${titleName} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : titleName;
+      displayTitle = optionLabels.length ? `${titleName} ${optionLabels.join(' ')}` : titleName;
     }
     if (isSubstituteMode()) {
       const requestLabel = normalized.substitute_request_type === 'person' ? '人不足' : '現場不足';
@@ -2360,7 +2429,7 @@ const ShifterSync = (function() {
     $(document).off('click', '.ss-entry-substitute-request-btn');
     $(document).off('click', '.ss-entry-assist-search-btn');
     $(document).off('click', '.ss-entry-leave-change-request-btn');
-    $(document).off('change', '#ss-entry-modal-option');
+    $(document).off('change', '.ss-entry-axis-option');
     $(document).off('change', '#ss-entry-modal-site-branch');
     $(document).off('click', '.ss-open-sync-source-btn');
   }
@@ -2772,7 +2841,13 @@ const ShifterSync = (function() {
       }
     });
 
-    $(document).on('change', '#ss-entry-modal-option', function() {
+    $(document).on('change', '.ss-entry-axis-option', function() {
+      const axis = String($(this).attr('data-axis') || '');
+      if ($(this).val() && axis === 'leave') {
+        $('#ss-entry-modal-time-option, #ss-entry-modal-vehicle-option, #ss-entry-modal-car-option').val('');
+      } else if ($(this).val()) {
+        $('#ss-entry-modal-leave-option').val('');
+      }
       refreshEntryModalBranchOptions();
     });
 
@@ -2813,7 +2888,9 @@ const ShifterSync = (function() {
     }
 
     const options = getSelectedOptionsForDay(dayKey);
-    let autoBranchFields = isSceneMode() ? autoBranchFieldsForOption(options[0] || null) : { site_branch_row_id: '', site_branch: '' };
+    const selectedAxes = axesFromSelectedOptions(options);
+    const selectedBranchOption = selectedAxes.vehicle_option || selectedAxes.car_option || null;
+    let autoBranchFields = isSceneMode() ? autoBranchFieldsForOption(selectedBranchOption) : { site_branch_row_id: '', site_branch: '' };
     let entryName = name;
     let employeeName = isSceneMode() ? name : '';
     let employeeNumber = getSelectedEmployeeNumberForInput(nameInput);
@@ -2868,7 +2945,7 @@ const ShifterSync = (function() {
     if (isPersonMode()) {
       const branchCandidates = siteBranchCandidatesForOptionFrom(
         getSelectedSiteBranchesForInput(nameInput),
-        options[0] || null
+        selectedBranchOption
       );
       autoBranchFields = branchCandidates.length === 1
         ? { site_branch_row_id: branchCandidates[0].id, site_branch: branchCandidates[0].site_branch }
@@ -2877,7 +2954,8 @@ const ShifterSync = (function() {
 
     const entry = normalizeEntry({
       id: makeEntryId(),
-      value: formatEntryValue(options[0] || null, entryName),
+      value: formatEntryValueFromAxes(entryName, selectedAxes),
+      ...selectedAxes,
       second_option: getSelectedSecondOptionForDay(dayKey),
       comment: commentInput.val().trim(),
       employee_name: employeeName,
@@ -3018,12 +3096,20 @@ const ShifterSync = (function() {
         .attr('data-option', key)
         .text(allOptionMappings[key] || key)
         .on('click', function() {
-          const current = getSelectedOptionsForDay(dayKey);
-          if (current[0] === key) {
-            clearSelectedOptionsForDay(dayKey);
+          let current = getSelectedOptionsForDay(dayKey).slice();
+          const axis = optionAxisForKey(key);
+          if (current.includes(key)) {
+            current = current.filter((item) => item !== key);
           } else {
-            setSelectedOptionsForDay(dayKey, [key]);
+            current = current.filter((item) => optionAxisForKey(item) !== axis);
+            if (axis === 'leave') {
+              current = [];
+            } else {
+              current = current.filter((item) => optionAxisForKey(item) !== 'leave');
+            }
+            current.push(key);
           }
+          setSelectedOptionsForDay(dayKey, current);
           updateOptionButtonStates(dayKey, $(this).closest('.popup-overlay'));
         });
       grid.append(btn);
@@ -3033,9 +3119,9 @@ const ShifterSync = (function() {
   }
 
   function updateOptionButtonStates(dayKey, overlay) {
-    const selected = getSelectedOptionsForDay(dayKey)[0] || null;
+    const selected = getSelectedOptionsForDay(dayKey);
     overlay.find('.option-btn').each(function() {
-      $(this).toggleClass('selected', $(this).attr('data-option') === selected);
+      $(this).toggleClass('selected', selected.includes($(this).attr('data-option')));
     });
     updateSecondOptionButtonStates(dayKey, overlay);
   }
@@ -3085,13 +3171,11 @@ const ShifterSync = (function() {
     if (!btn.length) {
       return;
     }
-    const selected = getSelectedOptionsForDay(day)[0];
+    const selected = getSelectedOptionsForDay(day);
     const second = getSelectedSecondOptionForDay(day);
     const shiftTimes = getSelectedShiftTimeTogglesForDay(day);
     const labels = [];
-    if (selected) {
-      labels.push(allOptionMappings[selected] || selected);
-    }
+    selected.forEach((key) => labels.push(allOptionMappings[key] || key));
     if (second) {
       labels.push(secondOptionMappings[second] || second);
     }
@@ -3116,10 +3200,10 @@ const ShifterSync = (function() {
     const popup = $('<div>').addClass('popup-content ss-option-popup');
     popup.append('<div class="popup-header">\u30aa\u30d7\u30b7\u30e7\u30f3\u9078\u629e</div>');
 
-    // \u7b2c\u4e00\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u5de6\uff09\u3068\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u53f3\uff09\u3092\u6a2a\u4e26\u3073\u306b\u3059\u308b\u3002
+    // 勤務・休暇の独立軸（左）と第二オプション（右）を横並びにする。
     const columns = $('<div>').addClass('ss-option-popup-columns');
     const firstCol = $('<div>').addClass('ss-option-popup-col ss-option-popup-col-first');
-    firstCol.append('<div class="ss-option-popup-col-title">\u7b2c\u4e00\u30aa\u30d7\u30b7\u30e7\u30f3</div>');
+    firstCol.append('<div class="ss-option-popup-col-title">勤務・休暇オプション</div>');
     getOptionSectionsForMode(state.mode).forEach((section) => {
       firstCol.append(createOptionSection(section.title, section.optionKeys, dayKey));
     });
@@ -3188,7 +3272,9 @@ const ShifterSync = (function() {
       return;
     }
 
-    const optionKey = $('#ss-entry-modal-option').val() || '';
+    const optionKey = $('#ss-entry-modal-vehicle-option').val()
+      || $('#ss-entry-modal-car-option').val()
+      || '';
     const availableBranches = isPersonMode()
       ? getSelectedSiteBranchesForInput($('#ss-entry-modal-name'))
       : currentSiteBranches();
@@ -3329,11 +3415,15 @@ const ShifterSync = (function() {
     }
 
     const parsed = parseEntryValue(entry.value);
+    const modalAxes = entryAxes(entry);
     $('#ss-entry-modal-title').text(`${dayDisplayLabel(day)}\u306e\u30a8\u30f3\u30c8\u30ea\u8a73\u7d30`);
     $('#ss-entry-modal-subtitle').text(state.editable ? '\u5185\u5bb9\u3092\u78ba\u8a8d\u3057\u3001\u5909\u66f4\u3057\u3066\u304f\u3060\u3055\u3044' : '\u5185\u5bb9\u3092\u78ba\u8a8d\u3067\u304d\u307e\u3059');
 
     const body = $('#ss-entry-modal-body');
-    const optionText = parsed.optionKey ? allOptionMappings[parsed.optionKey] || parsed.optionKey : '\u306a\u3057';
+    const optionText = [modalAxes.time_option, modalAxes.vehicle_option, modalAxes.car_option, modalAxes.leave_option]
+      .filter(Boolean)
+      .map((key) => allOptionMappings[key] || key)
+      .join(' / ') || '\u306a\u3057';
     const branchState = entryBranchState(entry);
     const siteContext = state.siteContext && typeof state.siteContext === 'object' ? state.siteContext : null;
     const canChooseBranch = (isSceneMode() && !!(siteContext && siteContext.is_linked)) || isPersonMode();
@@ -3367,8 +3457,7 @@ const ShifterSync = (function() {
     const canRequestLeaveChange = !state.editable
       && state.leaveChangeRequestEnabled
       && isPersonMode()
-      && parsed.optionKey
-      && leaveOptionKeys.includes(parsed.optionKey)
+      && modalAxes.leave_option
       && !syncedEntry
       && !hasPendingLeaveChangeRequest(entry)
       && typeof state.onLeaveChangeRequest === 'function';
@@ -3458,7 +3547,7 @@ const ShifterSync = (function() {
               <label class="ss-detail-label" for="ss-leave-change-request-option">\u7533\u8acb\u3059\u308b\u4f11\u6687\u7a2e\u5225</label>
               <select id="ss-leave-change-request-option" class="ss-detail-input">
                 ${leaveOptionKeys
-                  .filter((key) => key !== parsed.optionKey)
+                  .filter((key) => key !== modalAxes.leave_option)
                   .map((key) => `<option value="${key}">${escapeHtml(leaveOptionMappings[key] || key)}</option>`)
                   .join('')}
               </select>
@@ -3527,13 +3616,20 @@ const ShifterSync = (function() {
           <div id="ss-entry-modal-selected-note" class="ss-selected-note${entry.employee_number || selectedSite.site_id ? '' : ' ss-hidden'}">${entry.employee_number ? `選択中: ${escapeHtml(parsed.name)} / ${escapeHtml(entry.employee_number)}` : selectedSite.site_id ? `選択中: ${escapeHtml([selectedSite.site_id, selectedSite.site_name].filter(Boolean).join(' / '))}` : ''}</div>
           <div id="ss-entry-modal-candidate-panel" class="ss-candidate-panel ss-hidden" data-search-kind="modal"></div>
         </div>
-        <div class="ss-detail-field">
-          <label class="ss-detail-label" for="ss-entry-modal-option">\u30aa\u30d7\u30b7\u30e7\u30f3</label>
-          <select id="ss-entry-modal-option" class="ss-detail-input">
-            <option value="">\u306a\u3057</option>
-            ${availableOptionKeys.map((key) => `<option value="${key}" ${key === parsed.optionKey ? 'selected' : ''}>${escapeHtml(allOptionMappings[key] || key)}</option>`).join('')}
-          </select>
-        </div>
+        ${[
+          ['time', '\u6642\u9593\u5e2f', shiftTimeOptionKeys],
+          ['vehicle', '\u8eca\u7a2e', vehicleOptionKeys],
+          ['car', '\u53f7\u8eca', vehicleNumberOptionKeys],
+          ...(isPersonMode() ? [['leave', '\u4f11\u6687', leaveOptionKeys]] : [])
+        ].map(([axis, label, keys]) => `
+          <div class="ss-detail-field">
+            <label class="ss-detail-label" for="ss-entry-modal-${axis}-option">${label}</label>
+            <select id="ss-entry-modal-${axis}-option" class="ss-detail-input ss-entry-axis-option" data-axis="${axis}">
+              <option value="">\u306a\u3057</option>
+              ${keys.map((key) => `<option value="${key}" ${key === modalAxes[`${axis}_option`] ? 'selected' : ''}>${escapeHtml(allOptionMappings[key] || key)}</option>`).join('')}
+            </select>
+          </div>
+        `).join('')}
         <div class="ss-detail-field">
           <label class="ss-detail-label" for="ss-entry-modal-second-option">\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3</label>
           <select id="ss-entry-modal-second-option" class="ss-detail-input">
@@ -3722,7 +3818,17 @@ const ShifterSync = (function() {
       return;
     }
 
-    const optionKey = $('#ss-entry-modal-option').val() || null;
+    const savedAxes = {
+      time_option: String($('#ss-entry-modal-time-option').val() || ''),
+      vehicle_option: String($('#ss-entry-modal-vehicle-option').val() || ''),
+      car_option: String($('#ss-entry-modal-car-option').val() || ''),
+      leave_option: String($('#ss-entry-modal-leave-option').val() || '')
+    };
+    if (savedAxes.leave_option) {
+      savedAxes.time_option = '';
+      savedAxes.vehicle_option = '';
+      savedAxes.car_option = '';
+    }
     const secondOption = normalizeSecondOption($('#ss-entry-modal-second-option').val());
     const comment = $('#ss-entry-modal-comment').val().trim();
     const $nameInput = $('#ss-entry-modal-name');
@@ -3817,7 +3923,8 @@ const ShifterSync = (function() {
       }
       return normalizeEntry({
         id: entry.id,
-        value: formatEntryValue(optionKey, entryName),
+        value: formatEntryValueFromAxes(entryName, savedAxes),
+        ...savedAxes,
         second_option: secondOption,
         comment,
         employee_name: employeeName,
