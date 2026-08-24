@@ -630,6 +630,7 @@ def test_owner_approved_leave_change_request_is_finalized_on_month_save(tmp_path
     module.current_user = _owner()
     approved_entries = month["entries_per_day"]
     approved_entries["1"][0]["value"] = "!COMP!Alpha Site"
+    approved_entries["1"][0]["leave_option"] = "COMP"
     approved_response = client.put(
         f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
         json={
@@ -687,6 +688,7 @@ def test_owner_approval_reflects_request_comment_into_entry_comment(tmp_path):
     module.current_user = _owner()
     approved_entries = month["entries_per_day"]
     approved_entries["1"][0]["value"] = "!COMP!Alpha Site"
+    approved_entries["1"][0]["leave_option"] = "COMP"
     approved_response = client.put(
         f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
         json={

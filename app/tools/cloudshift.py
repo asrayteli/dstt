@@ -75,6 +75,7 @@ try:
         SECOND_OPTION_MAPPINGS,
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
+        entry_options,
         entry_second_option,
         entry_shift_time_label,
         normalize_entries_for_month,
@@ -84,7 +85,11 @@ try:
         parse_entry_value,
         serialize_entry_rows,
     )
-    from .shiftersync_check import compare_shift_payloads, cross_mode_conflicts, is_duplicate_by_rules
+    from .shiftersync_check import (
+        compare_shift_payloads,
+        cross_mode_conflicts,
+        person_conflicts,
+    )
     from .shiftersync_format import ROLE_OPTION_MAPPINGS
     from .japan_holidays import JAPAN_HOLIDAYS
 except ImportError:
@@ -94,6 +99,7 @@ except ImportError:
         SECOND_OPTION_MAPPINGS,
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
+        entry_options,
         entry_second_option,
         entry_shift_time_label,
         normalize_entries_for_month,
@@ -103,7 +109,11 @@ except ImportError:
         parse_entry_value,
         serialize_entry_rows,
     )
-    from app.tools.shiftersync_check import compare_shift_payloads, cross_mode_conflicts, is_duplicate_by_rules  # type: ignore
+    from app.tools.shiftersync_check import (  # type: ignore
+        compare_shift_payloads,
+        cross_mode_conflicts,
+        person_conflicts,
+    )
     from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
 
 
@@ -116,7 +126,9 @@ LOCK_POLL_SECONDS = 0.05
 MAX_REVISION_SNAPSHOTS = 12
 OPTION_LABELS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS, **SECOND_OPTION_MAPPINGS}
 SHIFT_TIME_OPTION_KEYS = {"A", "P", "E", "L", "TEMP"}
-VEHICLE_OPTION_KEYS = {"M", "C", "O", "W", "V", "N1", "N2", "N3", "N4", "N5"}
+VEHICLE_OPTION_KEYS = {"M", "C", "O", "W", "V"}
+CAR_OPTION_KEYS = {"N1", "N2", "N3", "N4", "N5"}
+BRANCH_OPTION_KEYS = VEHICLE_OPTION_KEYS | CAR_OPTION_KEYS
 LEAVE_CHANGE_REQUEST_STATUSES = {"pending", "approved", "rejected"}
 DEFAULT_LEAVE_SYNC_OPTION_KEYS = tuple(
     key for key in LEAVE_OPTION_MAPPINGS if key != "PUBLIC"
@@ -1098,6 +1110,16 @@ def _entry_option_and_name(entry: dict[str, Any]) -> tuple[str, str]:
     return str(option_key or "").strip().upper(), str(raw_name or "").strip()
 
 
+def _entry_axis_fields(entry: dict[str, Any]) -> dict[str, str]:
+    options = entry_options(entry)
+    return {
+        "time_option": str(options["time"] or ""),
+        "vehicle_option": str(options["vehicle"] or ""),
+        "car_option": str(options["car"] or ""),
+        "leave_option": str(options["leave"] or ""),
+    }
+
+
 def _entry_employee_name(entry: dict[str, Any]) -> str:
     if not isinstance(entry, dict):
         return ""
@@ -1246,35 +1268,45 @@ def _scene_branch_fields_for_option(project: dict[str, Any], option_key: Any) ->
 def _scene_entry_with_siteplus_defaults(project: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(entry or {})
     option_key, name = _entry_option_and_name(normalized)
+    options = entry_options(normalized)
     branch_row_id = _coerce_site_row_id(normalized.get("site_branch_row_id"))
     if branch_row_id:
         branch = db.session.get(SiteBranch, int(branch_row_id))
         if branch and branch.is_active:
             branch_option = str(branch.cloudshift_option_key or "").strip().upper()
-            if branch_option in VEHICLE_OPTION_KEYS:
-                normalized["value"] = _format_entry_value(branch_option, name)
+            if branch_option in BRANCH_OPTION_KEYS:
+                if branch_option in VEHICLE_OPTION_KEYS:
+                    normalized["vehicle_option"] = branch_option
+                else:
+                    normalized["car_option"] = branch_option
                 normalized["site_branch_row_id"] = str(int(branch.id))
                 normalized["site_branch"] = str(branch.site_branch or "").strip()
-                return normalized
+                return normalize_entry(normalized)
     active_branches = _active_scene_branches_for_project(project)
     if not active_branches:
-        return normalized
-    if not branch_row_id and option_key:
+        return normalize_entry(normalized)
+    branch_axis_option = options["vehicle"] or options["car"] or (
+        option_key if option_key in BRANCH_OPTION_KEYS else ""
+    )
+    if not branch_row_id and branch_axis_option:
         matched = [
             branch for branch in active_branches
-            if str(branch.cloudshift_option_key or "").strip().upper() == option_key
+            if str(branch.cloudshift_option_key or "").strip().upper() == branch_axis_option
         ]
         if len(matched) == 1:
             normalized["site_branch_row_id"] = str(int(matched[0].id))
             normalized["site_branch"] = str(matched[0].site_branch or "").strip()
-            return normalized
-    if not branch_row_id and not option_key and len(active_branches) == 1:
+            return normalize_entry(normalized)
+    if not branch_row_id and not branch_axis_option and len(active_branches) == 1:
         branch_option = str(active_branches[0].cloudshift_option_key or "").strip().upper()
-        if branch_option in VEHICLE_OPTION_KEYS:
-            normalized["value"] = _format_entry_value(branch_option, name)
+        if branch_option in BRANCH_OPTION_KEYS:
+            if branch_option in VEHICLE_OPTION_KEYS:
+                normalized["vehicle_option"] = branch_option
+            else:
+                normalized["car_option"] = branch_option
             normalized["site_branch_row_id"] = str(int(active_branches[0].id))
             normalized["site_branch"] = str(active_branches[0].site_branch or "").strip()
-    return normalized
+    return normalize_entry(normalized)
 
 
 def _normalize_person_entry_site_link(entry: dict[str, Any]) -> dict[str, Any]:
@@ -1754,8 +1786,7 @@ def _project_public_urls(project: dict[str, Any]) -> dict[str, str]:
 def _entry_value_uses_site_link(project: dict[str, Any] | None, entry: dict[str, Any]) -> bool:
     if not project or not _coerce_site_row_id(entry.get("site_row_id")):
         return False
-    option_key, _ = _entry_option_and_name(entry)
-    if option_key in LEAVE_OPTION_MAPPINGS:
+    if entry_options(entry)["leave"]:
         return False
     mode = str(project.get("mode") or "").strip()
     if mode == "person":
@@ -3928,6 +3959,7 @@ def _month_summary_from_payload(project: dict[str, Any], month_data: dict[str, A
         day_comment_count = 0
         for entry in entries:
             option_key, raw_name = parse_entry_value(entry.get("value") or "")
+            options = entry_options(entry)
             name = str(raw_name or "").strip()
             employee_number = str(entry.get("employee_number") or "").strip()
             comment = str(entry.get("comment") or "").strip()
@@ -3935,7 +3967,7 @@ def _month_summary_from_payload(project: dict[str, Any], month_data: dict[str, A
                 comment_count += 1
                 day_comment_count += 1
 
-            include_primary_row = not (mode == "person" and option_key in LEAVE_OPTION_MAPPINGS)
+            include_primary_row = not (mode == "person" and options["leave"])
             if include_primary_row:
                 key = (name, employee_number)
                 if key not in primary_rows:
@@ -3953,14 +3985,16 @@ def _month_summary_from_payload(project: dict[str, Any], month_data: dict[str, A
                 if comment:
                     primary_rows[key]["comment_count"] += 1
 
-            if option_key in SHIFT_TIME_OPTION_KEYS:
-                time_counter[OPTION_LABELS.get(option_key, option_key)] = (
-                    time_counter.get(OPTION_LABELS.get(option_key, option_key), 0) + 1
+            if options["time"]:
+                time_key = str(options["time"])
+                time_counter[OPTION_LABELS.get(time_key, time_key)] = (
+                    time_counter.get(OPTION_LABELS.get(time_key, time_key), 0) + 1
                 )
                 work_entry_count += 1
-            elif option_key in LEAVE_OPTION_MAPPINGS:
-                leave_counter[OPTION_LABELS.get(option_key, option_key)] = (
-                    leave_counter.get(OPTION_LABELS.get(option_key, option_key), 0) + 1
+            elif options["leave"]:
+                leave_key = str(options["leave"])
+                leave_counter[OPTION_LABELS.get(leave_key, leave_key)] = (
+                    leave_counter.get(OPTION_LABELS.get(leave_key, leave_key), 0) + 1
                 )
                 leave_entry_count += 1
             elif option_key:
@@ -3968,10 +4002,10 @@ def _month_summary_from_payload(project: dict[str, Any], month_data: dict[str, A
             else:
                 work_entry_count += 1
 
-            if option_key in VEHICLE_OPTION_KEYS:
-                vehicle_counter[OPTION_LABELS.get(option_key, option_key)] = (
-                    vehicle_counter.get(OPTION_LABELS.get(option_key, option_key), 0) + 1
-                )
+            for vehicle_key in (options["vehicle"], options["car"]):
+                if vehicle_key:
+                    label = OPTION_LABELS.get(vehicle_key, vehicle_key)
+                    vehicle_counter[label] = vehicle_counter.get(label, 0) + 1
 
         if day_comment_count:
             comment_days += 1
@@ -4958,8 +4992,8 @@ def _matching_scene_project_ids_for_person_entry(
     *,
     summaries: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    option_key, site_name_from_value = _entry_option_and_name(entry)
-    if option_key in LEAVE_OPTION_MAPPINGS:
+    _option_key, site_name_from_value = _entry_option_and_name(entry)
+    if entry_options(entry)["leave"]:
         return []
     site_link = _entry_site_link_fields(entry)
     if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
@@ -4988,6 +5022,7 @@ def _build_person_synced_entry_from_scene(
     return {
         "id": _sync_entry_id(SHIFT_SYNC_SCENE_SOURCE, source_project.get("id"), month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, site_name),
+        **_entry_axis_fields(entry),
         "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_number": "",
@@ -5019,10 +5054,14 @@ def _build_scene_synced_entry_from_person(
 ) -> dict[str, Any]:
     option_key, _ = _entry_option_and_name(entry)
     source_entry_id = str(entry.get("id") or "").strip()
-    branch_fields = _scene_branch_fields_for_option(target_project, option_key)
+    source_options = entry_options(entry)
+    branch_fields = _scene_branch_fields_for_option(
+        target_project, source_options["vehicle"] or source_options["car"]
+    )
     synced = {
         "id": _sync_entry_id(SHIFT_SYNC_PERSON_SOURCE, source_project.get("id"), month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, str(source_project.get("title") or "").strip()),
+        **_entry_axis_fields(entry),
         "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_number": str(source_project.get("employee_number") or "").strip(),
@@ -5057,6 +5096,7 @@ def _build_person_synced_entry_from_master(
     return {
         "id": _sync_entry_id(SHIFT_SYNC_MASTER_SOURCE, source_project.get("id"), "person", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, site_name),
+        **_entry_axis_fields(entry),
         "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_number": "",
@@ -5085,10 +5125,14 @@ def _build_scene_synced_entry_from_master(
     option_key, _ = _entry_option_and_name(entry)
     employee_name = _entry_employee_name(entry)
     source_entry_id = str(entry.get("id") or "").strip()
-    branch_fields = _scene_branch_fields_for_option(target_project, option_key)
+    source_options = entry_options(entry)
+    branch_fields = _scene_branch_fields_for_option(
+        target_project, source_options["vehicle"] or source_options["car"]
+    )
     synced = {
         "id": _sync_entry_id(SHIFT_SYNC_MASTER_SOURCE, source_project.get("id"), "scene", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, employee_name),
+        **_entry_axis_fields(entry),
         "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_name": employee_name,
@@ -5217,6 +5261,7 @@ def _build_master_synced_entry_from_person(
     return {
         "id": _sync_entry_id(SHIFT_SYNC_PERSON_SOURCE, source_project.get("id"), "master", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, site_name),
+        **_entry_axis_fields(entry),
         "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_name": employee_name,
@@ -5248,6 +5293,7 @@ def _build_master_synced_entry_from_scene(
     return {
         "id": _sync_entry_id(SHIFT_SYNC_SCENE_SOURCE, source_project.get("id"), "master", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, employee_name),
+        **_entry_axis_fields(entry),
         "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_name": employee_name,
@@ -5319,6 +5365,7 @@ def _substitute_assignment(entry: dict[str, Any]) -> dict[str, Any] | None:
 
     return {
         "option_key": option_key,
+        **_entry_axis_fields(entry),
         "employee_name": employee_name,
         "employee_number": employee_number,
         "site_row_id": str(site_link.get("site_row_id") or ""),
@@ -5351,6 +5398,7 @@ def _build_person_synced_entry_from_substitute(
     return {
         "id": _sync_entry_id(SHIFT_SYNC_SUBSTITUTE_SOURCE, source_project.get("id"), "person", month_key, day_key, assignment.get("source_entry_id")),
         "value": _format_entry_value(assignment.get("option_key"), assignment.get("site_name")),
+        **_entry_axis_fields(assignment),
         "comment": assignment.get("comment") or "",
         "employee_number": "",
         "site_row_id": str(assignment.get("site_row_id") or ""),
@@ -5389,6 +5437,7 @@ def _build_scene_synced_entry_from_substitute(
     synced = {
         "id": _sync_entry_id(SHIFT_SYNC_SUBSTITUTE_SOURCE, source_project.get("id"), "scene", month_key, day_key, assignment.get("source_entry_id")),
         "value": _format_entry_value(assignment.get("option_key"), assignment.get("employee_name")),
+        **_entry_axis_fields(assignment),
         "comment": assignment.get("comment") or "",
         "employee_name": str(assignment.get("employee_name") or ""),
         "employee_number": str(assignment.get("employee_number") or ""),
@@ -5791,6 +5840,7 @@ def _desired_shift_sync_entries_by_target(
             is_synced = _entry_is_shift_synced(entry)
             is_from_master = str(entry.get("sync_source_type") or "") == SHIFT_SYNC_MASTER_SOURCE
             option_key, entry_name = _entry_option_and_name(entry)
+            axes = entry_options(entry)
             if mode == "scene":
                 if not entry_name:
                     continue
@@ -5815,7 +5865,7 @@ def _desired_shift_sync_entries_by_target(
                             _build_master_synced_entry_from_scene(source_project, entry, month_key=month_key, day_key=day_key)
                         )
             elif mode == "person":
-                if option_key in LEAVE_OPTION_MAPPINGS:
+                if axes["leave"]:
                     continue
                 site_link = _entry_site_link_fields(entry)
                 if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
@@ -5841,7 +5891,7 @@ def _desired_shift_sync_entries_by_target(
             elif mode == "master":
                 if is_synced:
                     continue
-                if option_key in LEAVE_OPTION_MAPPINGS:
+                if axes["leave"]:
                     continue
                 if not entry_name:
                     continue
@@ -6209,8 +6259,7 @@ def _desired_master_entries_from_source(
             for entry in entries:
                 if str(entry.get("sync_source_type") or "") == SHIFT_SYNC_MASTER_SOURCE:
                     continue
-                option_key, _ = _entry_option_and_name(entry)
-                if option_key in LEAVE_OPTION_MAPPINGS:
+                if entry_options(entry)["leave"]:
                     continue
                 site_link = _entry_site_link_fields(entry)
                 if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
@@ -8809,7 +8858,11 @@ def _rule_effective_for_date(rule: dict[str, Any], target_date: date) -> bool:
     return True
 
 
-ASSIST_CONFLICT_MODE_LABELS = {"scene": "現場シフト", "person": "個人シフト"}
+ASSIST_CONFLICT_MODE_LABELS = {
+    "scene": "現場シフト",
+    "person": "個人シフト",
+    LARGE_MODE: "大規模シフト",
+}
 
 
 def _assist_conflict_scope_office_ids(project: dict[str, Any]) -> set[int]:
@@ -8846,27 +8899,25 @@ def _assist_person_book_identity(project: dict[str, Any]) -> tuple[str, str]:
     return employee_number, ("" if title == PERSON_UNASSIGNED_TITLE else title)
 
 
-def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -> list[dict[str, str]]:
-    """対象日に同じ人がすでに入っている既存シフトを、現場・個人シフト帳から集める。
+def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -> list[dict[str, Any]]:
+    """対象日の既存勤務を、同じ営業所の現場・個人・大規模帳から集める。
 
     - 範囲は同じ営業所のシフト帳すべて（他の所有者のものも含む）。営業所を特定
       できないときだけ、従来どおり同じ所有者のシフト帳に限定する。
-    - 個人シフト帳は「帳簿＝人」なので、人物は帳簿側（社員番号・タイトル）、
-      勤務先はエントリ名（現場名）から取る。
-    - 他帳から同期された鏡像エントリは実配置の複製なので数えない（元帳側で1回だけ数える）。
+    - 同期鏡像は origin_key で元帳または代理エントリの1件にまとめる。
+    - 大規模の勤務コードは時間帯記号へ推定せず、終日勤務として扱う。
     """
     project_id = str(project.get("id") or "").strip()
     owner_user_id = str(project.get("owner_user_id") or "").strip()
     scope_office_ids = _assist_conflict_scope_office_ids(project)
     month_key = _month_key(target_date.year, target_date.month)
-    day_key = str(target_date.day)
-    entries: list[dict[str, str]] = []
-    seen: set[tuple[str, str, str, str, str]] = set()
+    entries: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
     owner_office_cache: dict[str, set[int]] = {}
-    # 参照するのは対象月の現場・個人帳のみ。全プロジェクト・全月のフルロードを避ける。
     other_projects = [
         *_iter_project_summaries_for_month(month_key, mode="scene"),
         *_iter_project_summaries_for_month(month_key, mode="person"),
+        *_iter_project_summaries_for_month(month_key, mode=LARGE_MODE),
     ]
     for other_project in other_projects:
         if not isinstance(other_project, dict):
@@ -8883,46 +8934,42 @@ def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -
             owner_office_cache=owner_office_cache,
         ):
             continue
-        month_data = (other_project.get("months") or {}).get(month_key)
-        if not isinstance(month_data, dict):
-            continue
-        day_entries = (month_data.get("entries_per_day") or {}).get(day_key)
-        if not isinstance(day_entries, list):
-            continue
         other_project_id = str(other_project.get("id") or "").strip()
-        book_title = str(other_project.get("title") or "").strip() or "名称未設定"
-        book_employee_number, book_person_name = _assist_person_book_identity(other_project)
-        for entry in day_entries:
-            if not isinstance(entry, dict):
+        project_title = str(other_project.get("title") or "").strip() or "名称未設定"
+        for record in _conflict_records_for_project(other_project, target_date.year, target_date.month):
+            if int(record.get("day") or 0) != target_date.day:
                 continue
-            if str(entry.get("sync_source_type") or "").strip():
-                continue
-            shift_key, entry_name = parse_entry_value(entry.get("value") or "")
-            normalized_shift_key = str(shift_key or "").strip()
-            if other_mode == "person":
-                person_name = book_person_name
-                employee_number = book_employee_number
-                where_label = str(entry_name or "").strip() or book_title
-            else:
-                person_name = str(entry_name or "").strip()
-                employee_number = str(entry.get("employee_number") or "").strip()
-                where_label = book_title
-            if not person_name and not employee_number:
-                continue
-            key = (other_project_id, normalized_shift_key, employee_number, person_name, where_label)
+            options = record.get("options") if isinstance(record.get("options"), dict) else entry_options(record)
+            shift_key = options["time"]
+            employee_number = str(record.get("employee_number") or "").strip()
+            normalized_name = str(record.get("person_label") or "").strip()
+            person_key = str(record.get("person_key") or "").strip()
+            origin_key = str(record.get("origin_key") or "").strip()
+            key = (
+                "origin",
+                origin_key,
+                person_key,
+                str(record.get("day") or ""),
+            ) if origin_key else (other_project_id, str(shift_key or ""), person_key, normalized_name)
             if key in seen:
                 continue
             seen.add(key)
             entries.append(
                 {
                     "project_id": other_project_id,
-                    "project_title": where_label,
+                    "project_title": (
+                        str(record.get("placement_label") or "").strip() or project_title
+                        if other_mode == "person"
+                        else project_title
+                    ),
                     "project_mode": other_mode,
                     "project_mode_label": ASSIST_CONFLICT_MODE_LABELS[other_mode],
-                    "shift_key": normalized_shift_key,
-                    "shift_label": _assist_shift_label(shift_key),
-                    "entry_name": person_name,
+                    "shift_key": str(shift_key or "").strip(),
+                    "shift_label": "終日" if other_mode == LARGE_MODE and not shift_key else _assist_shift_label(shift_key),
+                    "entry_name": normalized_name,
                     "employee_number": employee_number,
+                    "person_key": person_key,
+                    "options": options,
                 }
             )
     entries.sort(
@@ -8955,7 +9002,7 @@ def _assist_candidate_matches_scene_entry(
 
 
 def _assist_scene_conflicts_for_candidate(
-    conflict_entries: list[dict[str, str]],
+    conflict_entries: list[dict[str, Any]],
     *,
     shift_key: str,
     candidate_name: str,
@@ -8964,6 +9011,9 @@ def _assist_scene_conflicts_for_candidate(
     conflicts: list[dict[str, str]] = []
     seen: set[tuple[str, str, str, str]] = set()
     normalized_shift_key = str(shift_key or "").strip() or None
+    candidate_options = entry_options(
+        f"!{normalized_shift_key}!candidate" if normalized_shift_key else "candidate"
+    )
     for entry in conflict_entries:
         if not _assist_candidate_matches_scene_entry(
             candidate_name=candidate_name,
@@ -8973,7 +9023,8 @@ def _assist_scene_conflicts_for_candidate(
         ):
             continue
         other_shift_key = str(entry.get("shift_key") or "").strip() or None
-        if not is_duplicate_by_rules(normalized_shift_key, other_shift_key):
+        other_options = entry.get("options") if isinstance(entry.get("options"), dict) else entry_options(entry)
+        if not person_conflicts(candidate_options, other_options):
             continue
         key = (
             str(entry.get("project_id") or "").strip(),
@@ -9503,7 +9554,8 @@ def _cloudshift_leave_rows(
 
         date_text = f"{month_data['year']:04d}-{month_data['month']:02d}-{day:02d}"
         for index, entry in enumerate(entries or []):
-            option_key, name = parse_entry_value((entry or {}).get("value", ""))
+            _option_key, name = parse_entry_value((entry or {}).get("value", ""))
+            option_key = entry_options(entry)["leave"]
             if option_keys is not None and option_key not in option_keys:
                 continue
             leave_type = _leave_option_label(option_key)
@@ -9692,8 +9744,8 @@ def _create_leave_change_request(project: dict[str, Any], payload: dict[str, Any
     if _entry_is_shift_synced(entry):
         raise CloudShiftError("同期反映された休暇は申請対象外です", 400)
 
-    old_option_key, entry_name = parse_entry_value(str(entry.get("value") or ""))
-    old_option_key = str(old_option_key or "").strip().upper()
+    _legacy_option_key, entry_name = parse_entry_value(str(entry.get("value") or ""))
+    old_option_key = str(entry_options(entry)["leave"] or "").strip().upper()
     if old_option_key not in LEAVE_OPTION_MAPPINGS:
         raise CloudShiftError("休暇エントリのみ申請できます", 400)
     if requested_option_key == old_option_key:
@@ -9840,8 +9892,7 @@ def _finalize_approved_leave_change_requests(
         )
         if not entry:
             raise CloudShiftError("承認対象の休暇が見つかりません。再読み込みしてください", 409)
-        option_key, _ = parse_entry_value(str(entry.get("value") or ""))
-        option_key = str(option_key or "").strip().upper()
+        option_key = str(entry_options(entry)["leave"] or "").strip().upper()
         if option_key != item.get("requested_option_key"):
             raise CloudShiftError("承認した休暇種別が保存内容に反映されていません", 409)
         request_comment = str(item.get("request_comment") or "").strip()
@@ -10406,6 +10457,7 @@ def api_conflict_check():
                 "label": project["title"],
                 "title": project["title"],
                 "mode": project["mode"],
+                "employee_number": str(project.get("employee_number") or "").strip(),
                 "year": year,
                 "month": month,
                 "required_capacity": month_data.get("required_capacity", 0) if month_data.get("capacity_enabled") else 0,
@@ -10447,7 +10499,9 @@ def _conflict_records_for_project(project: dict[str, Any], year: int, month: int
     - 大規模: レギュラー/代務のローカル割当(source_type=='local')のみを対象にし、
       勤務は実時間帯、休みは is_leave=True を持たせる。他現場(scene)・同期(sync)割当は
       当該人物の実配置ではない/鏡像なので除外する。
-    - 現場/個人: 同期鏡像(sync_source_type 付き)を除外し、社員番号優先で人物同定する。
+    - 現場/個人: 現場・個人・大規模の同期鏡像は元帳側で数えるため除外する。
+      マスター・解決済み要代務は元帳自体が検査対象外なので、同期先を代理として残し、
+      origin_key で同じ元エントリを1回にまとめる。人物同定は社員番号を優先する。
     """
     mode = str(project.get("mode") or "")
     month_key = _month_key(year, month)
@@ -10504,9 +10558,16 @@ def _conflict_records_for_project(project: dict[str, Any], year: int, month: int
                     label = (code.get("label") if code else "") or str(assignment.get("code_key") or "")
                     records.append({
                         "book_id": book_id, "book_label": book_label, "book_mode": mode,
+                        "origin_key": f"{book_id}:{day}:{entry.get('id') or member.get('id')}:{assignment.get('id') or assignment.get('code_key')}",
                         "person_key": person_key,
                         "person_label": name or member.get("display_name") or number,
+                        "employee_number": number,
                         "day": day, "option": None, "is_leave": is_leave, "time_range": time_range,
+                        "options": {
+                            "time": None, "vehicle": None, "car": None,
+                            "leave": "OTHER" if is_leave else None, "second": None,
+                        },
+                        "placement_label": label,
                         "display": f"{book_label}・{label}",
                     })
         return records
@@ -10517,8 +10578,17 @@ def _conflict_records_for_project(project: dict[str, Any], year: int, month: int
     for day_key, day_entries in entries.items():
         day = int(day_key)
         for entry in day_entries:
-            # 他モードからの同期鏡像は実配置の複製なので除外（元帳側で1回だけ数える）。
-            if str(entry.get("sync_source_type") or "").strip():
+            # scene/person/large 元帳由来の鏡像は元帳側で数える。master と要代務は
+            # 元帳自体が横断チェック対象外なので、同期先を実配置の代理として残す。
+            sync_type = str(entry.get("sync_source_type") or "").strip()
+            if sync_type in {
+                SHIFT_SYNC_SCENE_SOURCE,
+                SHIFT_SYNC_PERSON_SOURCE,
+                SHIFT_SYNC_LARGE_SOURCE,
+                SHIFT_SYNC_SUBSTITUTE_REQUEST_SOURCE,
+            }:
+                continue
+            if sync_type and sync_type not in {SHIFT_SYNC_MASTER_SOURCE, SHIFT_SYNC_SUBSTITUTE_SOURCE}:
                 continue
             option_key, name = _entry_option_and_name(entry)
             if mode == "person":
@@ -10534,11 +10604,20 @@ def _conflict_records_for_project(project: dict[str, Any], year: int, month: int
             person_key = number or (f"name:{normalized_name}" if normalized_name else "")
             if not person_key:
                 continue
-            is_leave = bool(option_key) and option_key in LEAVE_OPTION_MAPPINGS
+            options = entry_options(entry)
+            is_leave = bool(options["leave"])
             records.append({
                 "book_id": book_id, "book_label": book_label, "book_mode": mode,
+                "origin_key": (
+                    f"{entry.get('sync_source_project_id')}:{entry.get('sync_source_month_key')}:{entry.get('sync_source_day')}:{entry.get('sync_source_entry_id')}"
+                    if sync_type and entry.get("sync_source_project_id") and entry.get("sync_source_entry_id")
+                    else (f"{book_id}:{day}:{entry.get('id')}" if entry.get("id") else "")
+                ),
                 "person_key": person_key, "person_label": person_label or name or number,
+                "employee_number": number,
                 "day": day, "option": option_key or None, "is_leave": is_leave, "time_range": None,
+                "options": options,
+                "placement_label": detail,
                 "display": f"{book_label}・{detail}" if detail else book_label,
             })
     return records
@@ -12587,8 +12666,7 @@ def _source_entry_for_substitute_request(
         if isinstance(entry, dict) and str(entry.get("id") or "") == entry_id:
             if _entry_is_shift_synced(entry):
                 raise CloudShiftError("同期反映されたシフトからは代務要請できません", 400)
-            option_key, _ = _entry_option_and_name(entry)
-            if option_key in LEAVE_OPTION_MAPPINGS:
+            if entry_options(entry)["leave"]:
                 raise CloudShiftError("休暇シフトからは代務要請できません", 400)
             return entry
     raise CloudShiftError("指定されたシフトが見つかりません", 404)
@@ -12627,6 +12705,7 @@ def _substitute_request_payload_from_source(
         return {
             **base,
             "value": _format_entry_value(option_key, site_name),
+            **_entry_axis_fields(source_entry),
             "employee_name": "",
             "employee_number": "",
             "site_row_id": str(site_link.get("site_row_id") or ""),
@@ -12647,6 +12726,7 @@ def _substitute_request_payload_from_source(
         return {
             **base,
             "value": _format_entry_value(option_key, employee_name),
+            **_entry_axis_fields(source_entry),
             "employee_name": employee_name,
             "employee_number": employee_number,
             "site_row_id": "",

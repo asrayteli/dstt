@@ -193,7 +193,7 @@ def _site_experience_counts(
     counts: dict[str, int] = {}
     names: dict[str, str] = {}
     try:
-        from app.tools.shiftersync_format import entry_second_option, parse_entry_value
+        from app.tools.shiftersync_format import entry_options, entry_second_option, parse_entry_value
     except Exception:  # pragma: no cover
         return counts, names
     for month_data in (project.get("months") or {}).values():
@@ -209,11 +209,11 @@ def _site_experience_counts(
                 if not number:
                     continue
                 option, name = parse_entry_value(entry.get("value") or "")
-                opt = _str(option)
-                if opt in LEAVE_OPTION_KEYS:
+                axes = entry_options(entry)
+                if axes["leave"]:
                     continue
                 # 研修(TRAIN)は一人での実績ではないため実績数に数えない
-                role = _str(entry_second_option(entry)) or opt
+                role = _str(entry_second_option(entry)) or _str(option)
                 if role == _ROLE_OPTION_TRAINING:
                     continue
                 counts[number] = counts.get(number, 0) + 1
@@ -504,7 +504,7 @@ def build_existing_assignments(
     warnings: list[PlanningWarning],
 ) -> list[ExistingAssignment]:
     """対象月の確定 entries_per_day を ExistingAssignment + lock_policy へ変換する。"""
-    from app.tools.shiftersync_format import normalize_entries_for_month, parse_entry_value
+    from app.tools.shiftersync_format import entry_options, normalize_entries_for_month, parse_entry_value
 
     site_row_id = _coerce_site_row_id(project.get("site_row_id"))
     entries = normalize_entries_for_month(month_data.get("entries_per_day"), year, month)
@@ -517,8 +517,9 @@ def build_existing_assignments(
         d = date(year, month, day)
         for entry in day_entries:
             number = _str(entry.get("employee_number"))
-            option, name = parse_entry_value(entry.get("value") or "")
-            shift_key = _str(option)
+            _option, name = parse_entry_value(entry.get("value") or "")
+            axes = entry_options(entry)
+            shift_key = _str(axes["leave"] or axes["time"])
             if not number:
                 # 番号なしは自動配置の対象にできない。固定保持できないため warning。
                 warnings.append(
@@ -533,7 +534,7 @@ def build_existing_assignments(
             # 有休系オプションの entry は「休みの予定」であり、自動作成が動かしては
             # いけないため existing_policy に関わらず固定で保持する。
             lock_policy = (
-                "locked" if shift_key in LEAVE_OPTION_KEYS
+                "locked" if axes["leave"]
                 else _lock_policy_for(existing_policy, sync_type)
             )
             result.append(
@@ -563,9 +564,10 @@ def build_existing_assignments(
 # - substitute(要代務): 解決済み（回答者が代務者を割り当てた）entry の代務者だけを
 #   勤務者として扱う。代務者が割り当たればその人の仕事になるため占有に含める。
 #   未割当・未解決の依頼は勤務確定でないため除外する（_substitute_assignment が判定）。
-# master(テンプレート)は実勤務ではないため一切対象外。
+# - large: ローカル勤務・休暇を大規模元帳から直接取り込む。
+# master(テンプレート)は元帳自体を対象外にし、同期先の master_shift を実勤務として扱う。
 _OCCUPANCY_DIRECT_MODES = {"scene", "person"}  # entry の employee がそのまま勤務者
-_OCCUPANCY_MODES = {"scene", "person", "substitute"}
+_OCCUPANCY_MODES = {"scene", "person", "substitute", "large"}
 
 
 def build_external_assignments(
@@ -579,15 +581,20 @@ def build_external_assignments(
       - scene/person 帳: entry の勤務者。
       - substitute(要代務)帳: 回答者が代務者を割り当てた（解決済み）entry の代務者
         （その人の仕事になるため占有に数える）。
-    - 休み（UnavailableDay, hard）: scene/person 帳で休みが入っていればその日は配置しない。
-    - master（テンプレート）は実勤務でないため対象外。
+      - large 帳: ローカル勤務コードを時間帯未設定（終日）、休暇コードを不可日として扱う。
+    - 休み（UnavailableDay, hard）: scene/person/large 帳で休みが入っていればその日は配置しない。
+    - master（テンプレート）元帳は対象外だが、同期先の master_shift は実勤務として扱う。
     - 対象シフト帳自身（同 id）と、対象帳から同期された mirror entry
       （sync_source_project_id == 対象 id）は除外し、自帳の予定で自分を締め出さない。
     戻り値は (external_assignments, leave_unavailable_days)。
     """
     try:
-        from app.tools.cloudshift import _iter_project_summaries_for_month, _substitute_assignment
-        from app.tools.shiftersync_format import parse_entry_value
+        from app.tools.cloudshift import (
+            _conflict_records_for_project,
+            _iter_project_summaries_for_month,
+            _substitute_assignment,
+        )
+        from app.tools.shiftersync_format import entry_options, parse_entry_value
     except Exception:  # pragma: no cover
         return [], []
 
@@ -608,6 +615,7 @@ def build_external_assignments(
     seen_work: set[tuple[str, date, str, str]] = set()
     seen_leave: set[tuple[str, date]] = set()
     seen_warn: set[tuple[str, str]] = set()
+    seen_mirror_origins: set[tuple[str, str, str, str]] = set()
 
     def warn(code: str, name: str, d: date) -> None:
         key = (code, name)
@@ -657,6 +665,39 @@ def build_external_assignments(
         project_id = _str(other.get("id"))
         project_title = _str(other.get("title")) or "他シフト帳"
         book_number = _str(other.get("employee_number"))  # person 帳の本人
+        if mode == "large":
+            for record in _conflict_records_for_project(other, year, month):
+                try:
+                    d = date(year, month, int(record.get("day") or 0))
+                except (TypeError, ValueError):
+                    continue
+                number = _str(record.get("employee_number"))
+                name = _str(record.get("person_label"))
+                if not number:
+                    warn(
+                        "leave_without_number" if record.get("is_leave") else "external_without_number",
+                        name,
+                        d,
+                    )
+                    continue
+                if record.get("is_leave"):
+                    key = (number, d)
+                    if key not in seen_leave:
+                        seen_leave.add(key)
+                        leave_days.append(
+                            UnavailableDay(
+                                employee_number=number,
+                                date=d,
+                                reason=f"{project_title}に休み予定",
+                                source="shift_entry",
+                                strength="hard",
+                                confirmed=True,
+                            )
+                        )
+                    continue
+                # 大規模の勤務コードは記号へ推定せず、時間帯未設定（終日）で占有する。
+                add_work(number, name, d, "", project_id, project_title, "large")
+            continue
         is_direct = mode in _OCCUPANCY_DIRECT_MODES
         for day_key, day_entries in entries_per_day.items():
             if not isinstance(day_entries, list):
@@ -674,6 +715,27 @@ def build_external_assignments(
                 if target_id and _str(entry.get("sync_source_project_id")) == target_id:
                     continue
 
+                sync_type = _str(entry.get("sync_source_type"))
+                if sync_type in {
+                    "scene_shift",
+                    "person_shift",
+                    "large_shift",
+                    "substitute_shift",
+                    "substitute_request",
+                }:
+                    continue
+                if sync_type == "master_shift":
+                    origin = (
+                        _str(entry.get("sync_source_project_id")),
+                        _str(entry.get("sync_source_month_key")),
+                        _str(entry.get("sync_source_day")),
+                        _str(entry.get("sync_source_entry_id")),
+                    )
+                    if all(origin) and origin in seen_mirror_origins:
+                        continue
+                    if all(origin):
+                        seen_mirror_origins.add(origin)
+
                 if not is_direct:
                     # 要代務帳: 回答者が代務者を割り当てた（解決済み）entry の代務者を勤務扱い
                     assignment = _substitute_assignment(entry)
@@ -688,10 +750,11 @@ def build_external_assignments(
                     )
                     continue
 
-                option, name = parse_entry_value(entry.get("value") or "")
-                shift_key = _str(option)
+                _option, name = parse_entry_value(entry.get("value") or "")
+                axes = entry_options(entry)
+                shift_key = _str(axes["time"])
                 number = _str(entry.get("employee_number")) or book_number
-                if shift_key in LEAVE_OPTION_KEYS:
+                if axes["leave"]:
                     if not number:
                         warn("leave_without_number", name, d)
                         continue
@@ -724,7 +787,7 @@ def leave_days_from_existing(existing: list[ExistingAssignment]) -> list[Unavail
     """対象シフト帳の有休系オプション entry を hard の不可日へ変換する。
 
     休みの予定が入っている日に、自動作成が同じ人へ勤務シフトを足さないための入力。
-    （有休系オプションは is_duplicate_by_rules では重複扱いにならないため、
+    （休暇は person_conflicts では人の重複扱いにならないため、
     既存配置として持つだけでは同日への新規配置を防げない。）
     """
     result: list[UnavailableDay] = []
@@ -942,7 +1005,7 @@ def _slots_from_demand_rules(rules, days, site_row_id, site_id, site_name) -> li
 
 
 def _slots_from_prev_month(project, days, year, month, site_row_id, site_id, site_name) -> list[RequiredSlot]:
-    from app.tools.shiftersync_format import normalize_entries_for_month, parse_entry_value
+    from app.tools.shiftersync_format import entry_options, normalize_entries_for_month
 
     prev_year, prev_month = _prev_month(year, month)
     prev_data = (project.get("months") or {}).get(_month_key(prev_year, prev_month))
@@ -957,8 +1020,7 @@ def _slots_from_prev_month(project, days, year, month, site_row_id, site_id, sit
         d = date(prev_year, prev_month, day)
         count = 0
         for entry in (prev_entries.get(str(day)) or []):
-            option, _name = parse_entry_value(entry.get("value") or "")
-            if _str(option) not in LEAVE_OPTION_KEYS:
+            if not entry_options(entry)["leave"]:
                 count += 1
         by_weekday_counts.setdefault(d.weekday(), []).append(count)
 

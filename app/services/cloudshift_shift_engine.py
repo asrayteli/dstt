@@ -4,7 +4,7 @@
 
 方針:
 - 本モジュールは Flask / SQLAlchemy / CloudShift の DB アクセス関数に依存しない。
-  唯一の外部依存は重複判定の正となる純粋関数 `is_duplicate_by_rules`
+  唯一の外部依存は重複判定の正となる純粋関数 `person_conflicts`
   （`app/tools/shiftersync_check.py`）と祝日定数 `JAPAN_HOLIDAYS`
   （`app/tools/japan_holidays.py`）であり、いずれも DB/Flask 非依存。
 - 入力は `ShiftPlanningRequest` 一つに正規化され、同じ入力・設定・revision なら
@@ -27,12 +27,12 @@ from typing import Any, Literal
 
 try:  # パッケージ／単体どちらでも読めるように両対応（既存コードと同じ流儀）
     from ..tools.japan_holidays import JAPAN_HOLIDAYS
-    from ..tools.shiftersync_check import LEAVE_OPTION_KEYS, is_duplicate_by_rules
+    from ..tools.shiftersync_check import LEAVE_OPTION_KEYS, person_conflicts
 except ImportError:  # pragma: no cover - 単体実行時のフォールバック
     from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
     from app.tools.shiftersync_check import (  # type: ignore
         LEAVE_OPTION_KEYS,
-        is_duplicate_by_rules,
+        person_conflicts,
     )
 
 
@@ -616,9 +616,20 @@ def build_planning_days(
 
 
 def _opt(shift_key: str | None) -> str | None:
-    """空文字を None に正規化（is_duplicate_by_rules はオプション無しを None で扱う）。"""
+    """空文字を None に正規化する。"""
     text = str(shift_key or "").strip()
     return text or None
+
+
+def _person_options(shift_key: str | None) -> dict[str, str | None]:
+    key = str(shift_key or "").strip().upper()
+    return {
+        "time": key if key in {"A", "P", "E", "L", "TEMP"} else None,
+        "vehicle": key if key in {"M", "C", "O", "W", "V"} else None,
+        "car": key if key in {"N1", "N2", "N3", "N4", "N5"} else None,
+        "leave": key if key in LEAVE_OPTION_KEYS else None,
+        "second": None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1065,13 +1076,13 @@ def _hard_ok(
 
     # 同一現場の同日重複
     for existing_opt in state.day_options.get(number, {}).get(day.date, ()):  # type: ignore[arg-type]
-        if is_duplicate_by_rules(option, existing_opt, same_site=True):
+        if person_conflicts(_person_options(option), _person_options(existing_opt), same_site=True):
             return False, "dup_same_site"
 
     # 他現場占有（番号一致のみ Hard）
     if slot.site_row_id not in ctx.relax_sites:
         for ext_opt in ctx.external_by_emp_date.get((number, day.date), ()):  # type: ignore[arg-type]
-            if is_duplicate_by_rules(option, ext_opt, same_site=False):
+            if person_conflicts(_person_options(option), _person_options(ext_opt), same_site=False):
                 return False, "external_dup"
 
     # 月次上限（Hard 設定時）
@@ -1623,7 +1634,7 @@ class GreedyRepairSolver:
             # 固定同士の同日重複（same_site=True）
             if not blocked:
                 for existing_opt in state.day_options.get(number, {}).get(slot.date, ()):  # type: ignore[arg-type]
-                    if is_duplicate_by_rules(option, existing_opt, same_site=True):
+                    if person_conflicts(_person_options(option), _person_options(existing_opt), same_site=True):
                         record(severity, "seed_duplicate",
                                f"固定配置同士が同日重複します: {number} {slot.date.isoformat()}",
                                number, slot)
@@ -1633,7 +1644,7 @@ class GreedyRepairSolver:
             # 他現場占有との衝突（same_site=False, 番号一致のみ）
             if not blocked and slot.site_row_id not in ctx.relax_sites:
                 for ext_opt in ctx.external_by_emp_date.get((number, slot.date), ()):  # type: ignore[arg-type]
-                    if is_duplicate_by_rules(option, ext_opt, same_site=False):
+                    if person_conflicts(_person_options(option), _person_options(ext_opt), same_site=False):
                         record(severity, "seed_external_conflict",
                                f"固定配置が他現場占有と衝突します: {number} {slot.date.isoformat()}",
                                number, slot)
@@ -1783,7 +1794,7 @@ class GreedyRepairSolver:
             return False
         option = _opt(slot.shift_key)
         for ext_opt in ctx.external_by_emp_date.get((worker.employee_number, day.date), ()):  # type: ignore[arg-type]
-            if is_duplicate_by_rules(option, ext_opt, same_site=False):
+            if person_conflicts(_person_options(option), _person_options(ext_opt), same_site=False):
                 return True
         return False
 
@@ -2687,7 +2698,7 @@ def validate_result(request: ShiftPlanningRequest, result: Any) -> list[Violatio
         option = _opt(assignment.shift_key)
         # 同一現場の同日重複
         for existing_opt in same_day_options.get((number, assignment.date), ()):
-            if is_duplicate_by_rules(option, existing_opt, same_site=True):
+            if person_conflicts(_person_options(option), _person_options(existing_opt), same_site=True):
                 violations.append(
                     Violation(
                         "same_site_duplicate",
@@ -2702,7 +2713,7 @@ def validate_result(request: ShiftPlanningRequest, result: Any) -> list[Violatio
         # 他現場占有
         if assignment.site_row_id not in relax_sites:
             for ext_opt in external_by_emp_date.get((number, assignment.date), ()):
-                if is_duplicate_by_rules(option, ext_opt, same_site=False):
+                if person_conflicts(_person_options(option), _person_options(ext_opt), same_site=False):
                     violations.append(
                         Violation(
                             "external_duplicate",

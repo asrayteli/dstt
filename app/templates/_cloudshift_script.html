@@ -303,7 +303,19 @@
     function createBulkEntryFromForm(dayKey, refs) {
       const name = refs.nameInput ? refs.nameInput.value.trim() : '';
       if (!name) return null;
-      const optionKey = refs.optionSelect ? refs.optionSelect.value : '';
+      const axes = {
+        time_option: refs.timeOptionSelect ? refs.timeOptionSelect.value : '',
+        vehicle_option: refs.vehicleOptionSelect ? refs.vehicleOptionSelect.value : '',
+        car_option: refs.carOptionSelect ? refs.carOptionSelect.value : '',
+        leave_option: refs.leaveOptionSelect ? refs.leaveOptionSelect.value : ''
+      };
+      if (axes.leave_option) {
+        axes.time_option = '';
+        axes.vehicle_option = '';
+        axes.car_option = '';
+      }
+      const compatibilityOption = axes.time_option || axes.vehicle_option || axes.car_option || axes.leave_option || '';
+      const branchOption = axes.vehicle_option || axes.car_option || '';
       const secondOption = refs.secondOptionSelect ? normalizeSecondOptionKey(refs.secondOptionSelect.value) : '';
       const comment = refs.commentInput ? refs.commentInput.value.trim() : '';
       const employeeNumber = refs.employeeInput
@@ -317,7 +329,7 @@
         ? String(selectedBranchOption && selectedBranchOption.getAttribute('data-site-branch') || '').trim()
         : '';
       const autoBranchFields = currentProject() && currentProject().mode === 'scene' && !explicitBranchRowId
-        ? autoBranchFieldsForOption(optionKey || null)
+        ? autoBranchFieldsForOption(branchOption || null)
         : { site_branch_row_id: explicitBranchRowId, site_branch: explicitBranch };
       const isPersonProject = !!(currentProject() && currentProject().mode === 'person');
       const nameDataset = refs.nameInput && refs.nameInput.dataset ? refs.nameInput.dataset : {};
@@ -333,7 +345,8 @@
         : { site_row_id: '', site_id: '', site_name: '' };
       return {
         id: makeEntryId(),
-        value: formatEntryValue(optionKey || null, name),
+        value: formatEntryValue(compatibilityOption || null, name),
+        ...axes,
         second_option: secondOption,
         comment,
         employee_number: employeeNumber,
@@ -349,6 +362,10 @@
       return {
         id: makeEntryId(),
         value: String(entry && entry.value ? entry.value : '').trim(),
+        time_option: String(entry && (entry.time_option || entry.timeOption) || '').trim(),
+        vehicle_option: String(entry && (entry.vehicle_option || entry.vehicleOption) || '').trim(),
+        car_option: String(entry && (entry.car_option || entry.carOption) || '').trim(),
+        leave_option: String(entry && (entry.leave_option || entry.leaveOption) || '').trim(),
         second_option: normalizeSecondOptionKey(entry && (entry.second_option || entry.secondOption || '')),
         comment: String(entry && entry.comment ? entry.comment : '').trim(),
         employee_number: String(entry && entry.employee_number ? entry.employee_number : '').trim(),
@@ -6352,15 +6369,21 @@
       const matrix = result.matrix && typeof result.matrix === 'object' ? result.matrix : {};
       const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
       const sameSiteConflicts = Array.isArray(result.same_site_conflicts) ? result.same_site_conflicts : [];
+      const leaveWorkConflicts = Array.isArray(result.leave_work_conflicts) ? result.leave_work_conflicts : [];
+      const vehicleConflicts = Array.isArray(result.vehicle_conflicts) ? result.vehicle_conflicts : [];
       const conflictSet = new Set(conflicts.map((item) => `${item.date}-${item.entry}`));
       const sameSiteSet = new Set(sameSiteConflicts.map((item) => `${item.date}-${item.entry}-${item.file_index}`));
+      const leaveWorkSet = new Set(leaveWorkConflicts.map((item) => `${item.date}-${item.entry}-${item.file_index == null ? 'cross' : item.file_index}`));
+      const vehicleSet = new Set(vehicleConflicts.map((item) => `${item.date}-${item.entry}-${item.file_index}`));
 
       const summaryHtml = `
         <div class="cloud-check-summary">
           <span class="cloud-badge">対象 ${labels.length}件</span>
           <span class="cloud-badge">年月 ${escapeHtml(formatMonthKey(result.month_key || `${result.year}-${String(result.month || '').padStart(2, '0')}`))}</span>
-          <span class="cloud-badge">他シフト重複 ${conflicts.length}件</span>
-          <span class="cloud-badge">同一シフト帳内重複 ${sameSiteConflicts.length}件</span>
+          <span class="cloud-badge">人の重複（帳簿間） ${conflicts.length}件</span>
+          <span class="cloud-badge">人の重複（帳簿内） ${sameSiteConflicts.length}件</span>
+          <span class="cloud-badge">休みと勤務が同日 ${leaveWorkConflicts.length}件</span>
+          <span class="cloud-badge">車両の重複 ${vehicleConflicts.length}件</span>
         </div>
       `;
 
@@ -6401,7 +6424,10 @@
               ? entries.map((entry) => {
                   const isConflict = conflictSet.has(`${day}-${entry.original}`);
                   const isSameSite = sameSiteSet.has(`${day}-${entry.original}-${index}`);
-                  return `<div class="cloud-check-entry${isConflict ? ' is-conflict' : ''}${isSameSite ? ' is-self-conflict' : ''}">${escapeHtml(entry.display || entry.original || '')}</div>`;
+                  const isLeaveWork = leaveWorkSet.has(`${day}-${entry.original}-${index}`) || leaveWorkSet.has(`${day}-${entry.original}-cross`);
+                  const isVehicle = vehicleSet.has(`${day}-${entry.original}-${index}`);
+                  const warning = isLeaveWork ? '休みと勤務が同日' : isVehicle ? '車両の重複' : '';
+                  return `<div class="cloud-check-entry${isConflict ? ' is-conflict' : ''}${isSameSite ? ' is-self-conflict' : ''}${isLeaveWork ? ' is-leave-work-conflict' : ''}${isVehicle ? ' is-vehicle-conflict' : ''}"${warning ? ` title="${warning}"` : ''}>${escapeHtml(entry.display || entry.original || '')}</div>`;
                 }).join('')
               : '<div class="cloud-check-entry is-empty">未登録</div>';
             return `<div class="cloud-check-cell${weekdayClass}${needsWarning ? ' is-capacity-warning' : ''}"><div class="cloud-check-entry-list">${entryHtml}</div></div>`;
@@ -6927,7 +6953,9 @@
         return;
       }
 
-      const optionKey = (form.querySelector('[name="bulk_option"]') || {}).value || '';
+      const optionKey = (form.querySelector('[name="bulk_vehicle_option"]') || {}).value
+        || (form.querySelector('[name="bulk_car_option"]') || {}).value
+        || '';
       let availableBranches = currentProjectSiteBranches();
       if (project.mode === 'person') {
         const nameInput = form.querySelector('[name="bulk_name"]');
@@ -7275,7 +7303,10 @@
         const templateEntry = createBulkEntryFromForm(null, {
           nameInput: form.querySelector('[name="bulk_name"]'),
           commentInput: form.querySelector('[name="bulk_comment"]'),
-          optionSelect: form.querySelector('[name="bulk_option"]'),
+          timeOptionSelect: form.querySelector('[name="bulk_time_option"]'),
+          vehicleOptionSelect: form.querySelector('[name="bulk_vehicle_option"]'),
+          carOptionSelect: form.querySelector('[name="bulk_car_option"]'),
+          leaveOptionSelect: form.querySelector('[name="bulk_leave_option"]'),
           secondOptionSelect: form.querySelector('[name="bulk_second_option"]'),
           employeeInput: form.querySelector('[name="bulk_employee_number"]'),
           branchSelect: form.querySelector('[name="bulk_site_branch_row_id"]'),
@@ -7375,12 +7406,35 @@
                 <input name="bulk_employee_number" class="cloud-input" type="text">
               </label>
               <label class="cloud-field">
-                <span>オプション</span>
-                <select name="bulk_option" class="cloud-input">
+                <span>時間帯</span>
+                <select name="bulk_time_option" class="cloud-input cloud-bulk-axis-option" data-axis="time">
                   <option value="">なし</option>
-                  ${buildBulkOptionSelect(project.mode)}
+                  ${['A', 'P', 'E', 'L', 'TEMP'].map((key) => `<option value="${key}">${escapeHtml(optionLabelForKey(key))}</option>`).join('')}
                 </select>
               </label>
+              <label class="cloud-field">
+                <span>車種</span>
+                <select name="bulk_vehicle_option" class="cloud-input cloud-bulk-axis-option" data-axis="vehicle">
+                  <option value="">なし</option>
+                  ${['M', 'C', 'O', 'W', 'V'].map((key) => `<option value="${key}">${escapeHtml(optionLabelForKey(key))}</option>`).join('')}
+                </select>
+              </label>
+              <label class="cloud-field">
+                <span>号車</span>
+                <select name="bulk_car_option" class="cloud-input cloud-bulk-axis-option" data-axis="car">
+                  <option value="">なし</option>
+                  ${['N1', 'N2', 'N3', 'N4', 'N5'].map((key) => `<option value="${key}">${escapeHtml(optionLabelForKey(key))}</option>`).join('')}
+                </select>
+              </label>
+              ${project.mode === 'person' ? `
+                <label class="cloud-field">
+                  <span>休暇</span>
+                  <select name="bulk_leave_option" class="cloud-input cloud-bulk-axis-option" data-axis="leave">
+                    <option value="">なし</option>
+                    ${['PAID', 'COMP', 'PUBLIC', 'CONDOLENCE', 'CARE', 'REFRESH', 'OTHER'].map((key) => `<option value="${key}">${escapeHtml(optionLabelForKey(key))}</option>`).join('')}
+                  </select>
+                </label>
+              ` : ''}
               <label class="cloud-field">
                 <span>第二オプション</span>
                 <select name="bulk_second_option" class="cloud-input">
@@ -7477,10 +7531,21 @@
         updateBulkFieldVisibility(form);
         updateBulkPreview(form);
       });
-      const bulkOptionSelect = form.querySelector('[name="bulk_option"]');
-      if (bulkOptionSelect) {
-        bulkOptionSelect.addEventListener('change', () => updateBulkBranchOptions(form));
-      }
+      form.querySelectorAll('.cloud-bulk-axis-option').forEach((select) => {
+        select.addEventListener('change', () => {
+          const axis = String(select.dataset.axis || '');
+          if (select.value && axis === 'leave') {
+            ['bulk_time_option', 'bulk_vehicle_option', 'bulk_car_option'].forEach((name) => {
+              const other = form.querySelector(`[name="${name}"]`);
+              if (other) other.value = '';
+            });
+          } else if (select.value) {
+            const leave = form.querySelector('[name="bulk_leave_option"]');
+            if (leave) leave.value = '';
+          }
+          updateBulkBranchOptions(form);
+        });
+      });
       form.querySelectorAll('[data-bulk-weekday], [name="bulk_start_day"], [name="bulk_end_day"], [name="bulk_copy_source_day"]').forEach((node) => {
         node.addEventListener('input', () => updateBulkPreview(form));
         node.addEventListener('change', () => updateBulkPreview(form));

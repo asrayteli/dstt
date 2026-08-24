@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.models import db  # noqa: E402
-from app.tools.shiftersync_check import is_duplicate_by_rules  # noqa: E402
+from app.tools.shiftersync_check import person_conflicts  # noqa: E402
 
 
 def _load_cloudshift_module():
@@ -144,12 +144,13 @@ def test_second_option_does_not_affect_duplicate_check():
     same_site = [c for c in result["same_site_conflicts"] if c["date"] == 1]
     assert same_site == []
 
-    # is_duplicate_by_rules 自体も代務/研修を終日拘束扱いしない
-    assert is_duplicate_by_rules("SUB", "A") is False
-    assert is_duplicate_by_rules("TRAIN", "M") is False
-    # 既存ルールの非回帰
-    assert is_duplicate_by_rules("A", "L") is False
-    assert is_duplicate_by_rules("A", "E") is True
+    # 第二オプションを変えても、時間帯だけで同じ結果になる。
+    assert person_conflicts(
+        {"time": "A", "second": "SUB"}, {"time": "L", "second": "TRAIN"}
+    ) is False
+    assert person_conflicts(
+        {"time": "A", "second": "SUB"}, {"time": "E", "second": None}
+    ) is True
 
 
 # ---------------------------------------------------------------------------
