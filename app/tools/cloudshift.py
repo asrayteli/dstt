@@ -5366,6 +5366,10 @@ def _substitute_assignment(entry: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "option_key": option_key,
         **_entry_axis_fields(entry),
+        # 代務・研修は通常の scene/person 同期と同じ第二オプションとして扱う。
+        # 要代務帳を経由してもバッジと経験集計が失われないよう、割当の中間表現へ
+        # 明示的に引き継ぐ。
+        "second_option": entry_second_option(entry),
         "employee_name": employee_name,
         "employee_number": employee_number,
         "site_row_id": str(site_link.get("site_row_id") or ""),
@@ -5399,6 +5403,7 @@ def _build_person_synced_entry_from_substitute(
         "id": _sync_entry_id(SHIFT_SYNC_SUBSTITUTE_SOURCE, source_project.get("id"), "person", month_key, day_key, assignment.get("source_entry_id")),
         "value": _format_entry_value(assignment.get("option_key"), assignment.get("site_name")),
         **_entry_axis_fields(assignment),
+        "second_option": entry_second_option(assignment),
         "comment": assignment.get("comment") or "",
         "employee_number": "",
         "site_row_id": str(assignment.get("site_row_id") or ""),
@@ -5438,6 +5443,7 @@ def _build_scene_synced_entry_from_substitute(
         "id": _sync_entry_id(SHIFT_SYNC_SUBSTITUTE_SOURCE, source_project.get("id"), "scene", month_key, day_key, assignment.get("source_entry_id")),
         "value": _format_entry_value(assignment.get("option_key"), assignment.get("employee_name")),
         **_entry_axis_fields(assignment),
+        "second_option": entry_second_option(assignment),
         "comment": assignment.get("comment") or "",
         "employee_name": str(assignment.get("employee_name") or ""),
         "employee_number": str(assignment.get("employee_number") or ""),
@@ -8839,6 +8845,10 @@ def _assist_bootstrap_for_project(
 ) -> dict[str, Any]:
     if project.get("mode") == LARGE_MODE:
         raise CloudShiftError("大規模シフト帳ではアシストを利用できません", 400)
+    if project.get("mode") == SUBSTITUTE_MODE:
+        # 要代務帳は候補データを自身に持たず、検索時に対象の現場帳を解決する。
+        # 登録・ルール編集タブは公開せず、候補サーチだけを提供する。
+        return _assist_bootstrap_payload(project, can_edit_records=False, can_edit_rules=False)
     if project.get("mode") == "person":
         return _person_assist_bootstrap_payload(project, can_edit_sites=can_edit_sites)
     return _assist_bootstrap_payload(project, can_edit_records=can_edit_records, can_edit_rules=can_edit_rules)
@@ -9059,7 +9069,87 @@ def _assist_scene_conflicts_for_candidate(
     return conflicts
 
 
+def _substitute_assist_target_scene(
+    project: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """要代務エントリが指す現場シフト帳をアシスト検索元として解決する。
+
+    保存済みエントリがある場合はクライアント値を信用せず、その entry の現場・
+    反映元情報を使う。保存前に追加した entry でも検索できるよう、見つからない場合
+    だけ payload の現場情報へフォールバックする。どちらも要代務帳の営業所と同じ
+    営業所に属する scene 帳に限定する。
+    """
+    if project.get("mode") != SUBSTITUTE_MODE:
+        return project
+
+    target_date_text, target_date = _assist_date_parts(payload.get("target_date"))
+    month_key = _month_key(target_date.year, target_date.month)
+    day_key = str(target_date.day)
+    target_entry_id = str(payload.get("target_entry_id") or "").strip()
+    stored_entry: dict[str, Any] | None = None
+    if target_entry_id:
+        month_data = (project.get("months") or {}).get(month_key) or {}
+        stored_entry = next(
+            (
+                entry
+                for entry in (month_data.get("entries_per_day") or {}).get(day_key, [])
+                if isinstance(entry, dict)
+                and str(entry.get("id") or "").strip() == target_entry_id
+            ),
+            None,
+        )
+
+    request_type = _substitute_request_type(stored_entry or payload)
+    if request_type != "scene":
+        raise CloudShiftError("人物不足の要代務では、行ける人のアシスト検索は利用できません", 400)
+
+    site = _entry_site_link_fields(stored_entry or {})
+    if not (site.get("site_row_id") or site.get("site_id") or site.get("site_name")):
+        site = _entry_site_link_fields(
+            {
+                "site_row_id": payload.get("target_site_row_id"),
+                "site_id": payload.get("target_site_id"),
+                "site_name": payload.get("target_site_name"),
+                "value": payload.get("target_site_name") or "",
+            }
+        )
+    if not (site.get("site_row_id") or site.get("site_id") or site.get("site_name")):
+        raise CloudShiftError("アシスト対象の現場が設定されていません", 400)
+
+    substitute_office_id = _substitute_office_id(project)
+
+    def in_office(candidate: dict[str, Any]) -> bool:
+        if substitute_office_id is None:
+            return True
+        return substitute_office_id in _project_created_office_ids(candidate)
+
+    source_project_id = str((stored_entry or {}).get("substitute_source_project_id") or "").strip()
+    source_project_mode = str((stored_entry or {}).get("substitute_source_project_mode") or "").strip()
+    if source_project_id and source_project_mode == "scene":
+        try:
+            source_project = _load_project(source_project_id)
+        except Exception:
+            source_project = None
+        if (
+            source_project
+            and source_project.get("mode") == "scene"
+            and in_office(source_project)
+            and _person_experience_matches_scene_project(site, source_project)
+        ):
+            return source_project
+
+    for candidate in _iter_project_summaries():
+        if candidate.get("mode") != "scene" or not in_office(candidate):
+            continue
+        if _person_experience_matches_scene_project(site, candidate):
+            return candidate
+
+    raise CloudShiftError(f"{target_date_text} の対象現場に対応する現場シフト帳が見つかりません", 404)
+
+
 def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    project = _substitute_assist_target_scene(project, payload)
     _ensure_scene_project(project)
     assist = _ensure_assist(project)
     target_date_text, target_date = _assist_date_parts(payload.get("target_date"))
@@ -12685,6 +12775,7 @@ def _substitute_request_payload_from_source(
     base = {
         "id": _substitute_request_entry_id(str(source_project.get("id") or ""), month_key, day_key, source_entry_id),
         "comment": str(source_entry.get("comment") or "").strip(),
+        "second_option": entry_second_option(source_entry),
         "substitute_resolved": False,
         "substitute_requester_user_id": _user_id(),
         "substitute_requester_name": _user_label(),
@@ -13033,7 +13124,9 @@ def api_leave_sync(project_id: str, year: int, month: int):
 @cloudshift_bp.route("/api/project/<project_id>/assist")
 @login_required
 def api_assist_owner(project_id: str):
-    project = _owner_project_or_404(project_id)
+    project, access_role = _project_for_current_user_or_404(project_id)
+    if access_role != "owner" and project.get("mode") != SUBSTITUTE_MODE:
+        abort(404)
     return jsonify(_assist_bootstrap_for_project(project, can_edit_records=True, can_edit_rules=True, can_edit_sites=True))
 
 
@@ -13408,7 +13501,9 @@ def api_assist_owner_update_profile(project_id: str, profile_id: str):
 @login_required
 def api_assist_owner_search(project_id: str):
     payload = request.get_json(silent=True) or {}
-    project = _owner_project_or_404(project_id)
+    project, access_role = _project_for_current_user_or_404(project_id)
+    if access_role != "owner" and project.get("mode") != SUBSTITUTE_MODE:
+        abort(404)
     return jsonify(_assist_search(project, payload))
 
 
