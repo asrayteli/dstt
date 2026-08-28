@@ -115,6 +115,7 @@ const ShifterSync = (function() {
     siteContext: null,
     siteBranches: [],
     dragEntry: null,
+    entryClipboard: null,
     suppressEntryClick: false,
     substituteRequestEnabled: false,
     onSubstituteRequest: null,
@@ -1709,12 +1710,6 @@ const ShifterSync = (function() {
     if (isMasterMode() && !isSyncedEntry(normalized)) {
       syncSourceLabel = '\u30de\u30b9\u30bf\u30fc';
       syncSourceTone = 'master-local';
-    } else if (isSubstituteRequestDisplay) {
-      syncSourceLabel = normalized.substitute_resolved ? '解決済み' : '';
-      syncSourceTone = normalized.substitute_resolved ? 'substitute-resolved' : '';
-    } else if (String(normalized.sync_source_type || '') === 'substitute_shift' && normalized.substitute_resolved) {
-      syncSourceLabel = '解決済み';
-      syncSourceTone = 'substitute-resolved';
     } else if (isMasterMode() && isSyncedEntry(normalized)) {
       const sourceTitle = String(normalized.sync_source_project_title || '').trim();
       const sourceType = String(normalized.sync_source_type || '').trim();
@@ -2397,6 +2392,7 @@ const ShifterSync = (function() {
   }
 
   function clearEventHandlers() {
+    closeEntryContextMenu();
     $(document).off('keydown', '.entry-input');
     $(document).off('change', '.entry-substitute-type');
     $(document).off('keydown', '.entry-master-side-input');
@@ -2412,6 +2408,7 @@ const ShifterSync = (function() {
     $(document).off('click', '.copy-btn');
     $(document).off('click', '.entry-item-delete');
     $(document).off('click', '.entry-item');
+    $(document).off('contextmenu', '.day-box');
     $(document).off('click', '.entry-drag-handle');
     $(document).off('dragstart', '.entry-item');
     $(document).off('dragover', '.entry-item');
@@ -2509,6 +2506,22 @@ const ShifterSync = (function() {
     if (!state.editable) {
       return;
     }
+
+    $(document).on('contextmenu', '.day-box', function(e) {
+      if ($(e.target).closest('input, textarea, select').length) {
+        return;
+      }
+      const day = String($(this).attr('data-day') || '');
+      if (!day) {
+        return;
+      }
+      const entryItem = $(e.target).closest('.entry-item');
+      const entryId = entryItem.length ? String(entryItem.attr('data-entry-id') || '') : '';
+      if (openEntryContextMenu(e, day, entryId)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
 
     $(document).on('click', '.entry-drag-handle', function(e) {
       e.preventDefault();
@@ -2821,11 +2834,16 @@ const ShifterSync = (function() {
       if (!day || !entryId || typeof state.onEntryAssist !== 'function') {
         return;
       }
-      // 入力途中のオプション・コメントを先に確定しておく。差し替え後もそのまま残す。
-      saveEntryFromModal();
-      if (!$('#ss-entry-modal').hasClass('ss-hidden')) {
-        // 入力エラーでモーダルが閉じていない（保存できていない）ので何もしない。
-        return;
+      const entryModalIsOpen = !$('#ss-entry-modal').hasClass('ss-hidden')
+        && String($('#ss-entry-modal-id').val() || '') === entryId;
+      if (entryModalIsOpen) {
+        // エントリ詳細内のボタンでは、入力途中のオプション・コメントを先に確定する。
+        // 日別詳細カードのボタンには編集フォームがないため、そのまま検索へ進む。
+        saveEntryFromModal();
+        if (!$('#ss-entry-modal').hasClass('ss-hidden')) {
+          // 入力エラーでモーダルが閉じていない（保存できていない）ので何もしない。
+          return;
+        }
       }
       const entry = getDayEntries(day).find((item) => item.id === entryId);
       if (!entry) {
@@ -2833,6 +2851,7 @@ const ShifterSync = (function() {
       }
       button.prop('disabled', true);
       try {
+        closeModal('day');
         await Promise.resolve(state.onEntryAssist({ day, entryId, entry: cloneEntry(entry, false) }));
       } catch (error) {
         alert(error && error.message ? error.message : 'アシストを開けませんでした');
@@ -3082,6 +3101,120 @@ const ShifterSync = (function() {
     updateEntryDisplay(day);
     updateCapacityWarning(day);
     closeModal('entry');
+  }
+
+  function closeEntryContextMenu() {
+    $('.ss-entry-context-menu').remove();
+    $(document).off('.ssEntryContextMenu');
+  }
+
+  function copySingleEntry(day, entryId) {
+    const entry = getDayEntries(day).find((item) => item.id === entryId);
+    if (!entry || isSyncedEntry(entry)) {
+      return false;
+    }
+    state.entryClipboard = cloneEntry(entry, false);
+    return !!state.entryClipboard;
+  }
+
+  function pasteSingleEntry(day, afterEntryId = '') {
+    const dayKey = String(day || '');
+    if (!dayKey || !state.entryClipboard) {
+      return false;
+    }
+    const pasted = cloneEntry(state.entryClipboard, true);
+    if (!pasted) {
+      return false;
+    }
+    const nextEntries = getDayEntries(dayKey).slice();
+    const afterIndex = afterEntryId
+      ? nextEntries.findIndex((entry) => entry.id === String(afterEntryId))
+      : -1;
+    nextEntries.splice(afterIndex >= 0 ? afterIndex + 1 : nextEntries.length, 0, pasted);
+    setDayEntries(dayKey, nextEntries);
+    updateEntryDisplay(dayKey);
+    updateCapacityWarning(dayKey);
+    updateBranchWarning(dayKey);
+    return true;
+  }
+
+  function openEntryContextMenu(event, day, entryId = '') {
+    const dayKey = String(day || '');
+    const entryKey = String(entryId || '');
+    const entry = entryKey ? getDayEntries(dayKey).find((item) => item.id === entryKey) : null;
+    const canMutateEntry = !!entry && !isSyncedEntry(entry);
+    if (!canMutateEntry && !state.entryClipboard) {
+      return false;
+    }
+
+    closeEntryContextMenu();
+    const menu = $('<div>')
+      .addClass('ss-entry-context-menu')
+      .attr({ role: 'menu', 'aria-label': 'シフトセル操作' });
+
+    if (canMutateEntry) {
+      menu.append(
+        $('<button>')
+          .attr({ type: 'button', role: 'menuitem' })
+          .text('コピー')
+          .on('click', function(e) {
+            e.stopPropagation();
+            copySingleEntry(dayKey, entryKey);
+            closeEntryContextMenu();
+          })
+      );
+    }
+    if (state.entryClipboard) {
+      menu.append(
+        $('<button>')
+          .attr({ type: 'button', role: 'menuitem' })
+          .text(canMutateEntry ? 'このシフトの後に貼り付け' : 'この日に貼り付け')
+          .on('click', function(e) {
+            e.stopPropagation();
+            pasteSingleEntry(dayKey, canMutateEntry ? entryKey : '');
+            closeEntryContextMenu();
+          })
+      );
+    }
+    if (canMutateEntry) {
+      menu.append($('<div>').addClass('ss-entry-context-separator').attr('role', 'separator'));
+      menu.append(
+        $('<button>')
+          .attr({ type: 'button', role: 'menuitem' })
+          .addClass('is-danger')
+          .text('削除')
+          .on('click', function(e) {
+            e.stopPropagation();
+            deleteEntry(dayKey, entryKey);
+            closeEntryContextMenu();
+          })
+      );
+    }
+
+    $('body').append(menu);
+    const original = event.originalEvent || event;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const menuWidth = menu.outerWidth() || 190;
+    const menuHeight = menu.outerHeight() || 120;
+    const left = Math.max(8, Math.min(Number(original.clientX || 0), viewportWidth - menuWidth - 8));
+    const top = Math.max(8, Math.min(Number(original.clientY || 0), viewportHeight - menuHeight - 8));
+    menu.css({ left: `${left}px`, top: `${top}px` });
+    menu.find('button').first().trigger('focus');
+
+    window.setTimeout(() => {
+      $(document).on('pointerdown.ssEntryContextMenu', function(e) {
+        if (!$(e.target).closest('.ss-entry-context-menu').length) {
+          closeEntryContextMenu();
+        }
+      });
+      $(document).on('keydown.ssEntryContextMenu', function(e) {
+        if (e.key === 'Escape') {
+          closeEntryContextMenu();
+        }
+      });
+    }, 0);
+    return true;
   }
 
   function createOptionSection(title, optionKeys, dayKey) {
@@ -3348,6 +3481,13 @@ const ShifterSync = (function() {
       html += entries.map((entry, index) => {
         const parts = getEntryDisplayParts(entry);
         const syncedEntry = isSyncedEntry(entry);
+        const canAssistEntry = state.entryAssistEnabled
+          && !syncedEntry
+          && (
+            state.mode === 'scene'
+            || (state.mode === 'substitute' && entry.substitute_request_type === 'scene')
+          )
+          && typeof state.onEntryAssist === 'function';
         return `
           <article class="ss-detail-card">
             <div class="ss-detail-row">
@@ -3360,6 +3500,7 @@ const ShifterSync = (function() {
               </div>
               ${state.editable && !syncedEntry ? `
                 <div class="ss-detail-actions">
+                  ${canAssistEntry ? `<button type="button" class="ss-entry-assist-search-btn muted-link" data-day="${day}" data-entry-id="${escapeHtml(entry.id)}">アシスト</button>` : ''}
                   <button type="button" class="ss-entry-edit-btn muted-link" data-day="${day}" data-entry-id="${entry.id}">\u7de8\u96c6</button>
                   <button type="button" class="ss-entry-delete-btn muted-link danger" data-day="${day}" data-entry-id="${entry.id}">\u524a\u9664</button>
                 </div>
@@ -3451,7 +3592,7 @@ const ShifterSync = (function() {
     // エントリ詳細からのアシスト（候補サーチ）。仮の名前で入れた行を、
     // コメント・オプション・並び順を保ったまま実在する人へ差し替えるための入口。
     const canAssistEntry = state.entryAssistEnabled
-      && isSceneMode()
+      && (isSceneMode() || (isSubstituteMode() && substituteRequestType === 'scene'))
       && !syncedEntry
       && typeof state.onEntryAssist === 'function';
     const canRequestLeaveChange = !state.editable

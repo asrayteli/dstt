@@ -947,6 +947,7 @@ def test_scene_shift_can_create_substitute_request_entry(tmp_path):
             "id": "scene-entry-1",
             "value": "!A!Alice",
             "comment": "needs cover",
+            "second_option": "TRAIN",
             "employee_name": "Alice",
             "employee_number": "1001",
         }
@@ -968,6 +969,7 @@ def test_scene_shift_can_create_substitute_request_entry(tmp_path):
     assert payload["substitute_project"]["mode"] == "substitute"
     assert entry["substitute_request_type"] == "scene"
     assert entry["value"] == "!A!Alpha Site"
+    assert entry["second_option"] == "TRAIN"
     assert entry["site_row_id"] == str(site_row_id)
     assert entry["substitute_requester_user_id"] == "owner01"
     assert entry["substitute_requester_name"] == "Owner User"
@@ -1068,6 +1070,7 @@ def test_resolved_substitute_shift_syncs_to_person_and_scene_projects(tmp_path):
             "substitute_request_type": "scene",
             "substitute_helper_employee_name": "Alice",
             "substitute_helper_employee_number": "1001",
+            "second_option": "SUB",
             "substitute_resolved": True,
         }
     ]
@@ -1082,6 +1085,7 @@ def test_resolved_substitute_shift_syncs_to_person_and_scene_projects(tmp_path):
             "substitute_request_type": "scene",
             "substitute_helper_employee_name": "",
             "substitute_helper_employee_number": "",
+            "second_option": "TRAIN",
             "substitute_resolved": True,
         }
     ]
@@ -1113,13 +1117,16 @@ def test_resolved_substitute_shift_syncs_to_person_and_scene_projects(tmp_path):
     scene_unassigned_entry = scene_detail["month"]["entries_per_day"]["2"][0]
     assert person_entry["value"] == "!A!Alpha Site"
     assert person_entry["sync_source_type"] == "substitute_shift"
+    assert person_entry["second_option"] == "SUB"
     assert scene_entry["value"] == "!A!Alice"
     assert scene_entry["employee_number"] == "1001"
     assert scene_entry["sync_source_type"] == "substitute_shift"
+    assert scene_entry["second_option"] == "SUB"
     assert scene_unassigned_entry["value"] == "!P!未設定"
     assert scene_unassigned_entry["employee_name"] == "未設定"
     assert scene_unassigned_entry["substitute_unassigned_helper"] is True
     assert scene_unassigned_entry["sync_source_type"] == "substitute_shift"
+    assert scene_unassigned_entry["second_option"] == "TRAIN"
 
     conflict_response = client.post(
         "/tools/shiftersync/cloudshift/api/conflict-check",
@@ -1131,6 +1138,98 @@ def test_resolved_substitute_shift_syncs_to_person_and_scene_projects(tmp_path):
     assert conflict_response.status_code == 200
     conflict_payload = conflict_response.get_json()
     assert {item["entry"] for item in conflict_payload["conflicts"]} == {"!A!Alice", "!E!Alice"}
+
+
+def test_substitute_scene_request_can_search_assist_from_owner_and_public_edit(tmp_path):
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        branch = AccessBranch(name="Tokyo", code="TK")
+        db.session.add(branch)
+        db.session.flush()
+        office = AccessOffice(branch_id=branch.id, name="Shinjuku", code="S01")
+        site = Site(
+            site_id="S101",
+            site_name="Alpha Site",
+            site_manager_last="Manager",
+            site_manager_first="One",
+            site_manager_id="M01",
+            site_register="tester",
+            site_updater="tester",
+            office_code="S01",
+            is_active=True,
+        )
+        db.session.add_all([office, site])
+        db.session.commit()
+        office_id = office.id
+        site_row_id = site.id
+
+    owner = _owner()
+    owner.office_id = office_id
+    module.current_user = owner
+    scene_payload = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Alpha Site",
+            "mode": "scene",
+            "site_row_id": str(site_row_id),
+            "year": "2026",
+            "month": "5",
+        },
+    ).get_json()["project"]
+    scene_id = scene_payload["project"]["id"]
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/assist/rules",
+        json={
+            "weekday": None,
+            "shift_key": "A",
+            "enabled": True,
+            "notes": "morning backup",
+            "assignments": [
+                {
+                    "candidate_name": "Helper One",
+                    "employee_number": "2001",
+                    "role_type": "backup",
+                    "priority": 1,
+                }
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+
+    request_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/substitute-request",
+        json={"year": 2026, "month": 5, "day": 3, "option_key": "A"},
+    )
+    assert request_response.status_code == 200
+    request_payload = request_response.get_json()
+    substitute_id = request_payload["substitute_project"]["id"]
+    substitute_entry_id = request_payload["entry"]["id"]
+
+    module.current_user = _employee_user("3001", office_id=office_id, name="Office Editor")
+    owner_search = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{substitute_id}/assist/search",
+        json={
+            "target_date": "2026-05-03",
+            "shift_key": "A",
+            "target_entry_id": substitute_entry_id,
+        },
+    )
+    assert owner_search.status_code == 200
+    assert owner_search.get_json()["results"][0]["name"] == "Helper One"
+
+    with client.application.app_context():
+        edit_token = module._load_project(substitute_id)["edit_token"]
+    module.current_user = _guest()
+    public_search = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/edit/{edit_token}/assist/search",
+        json={
+            "target_date": "2026-05-03",
+            "shift_key": "A",
+            "target_entry_id": substitute_entry_id,
+        },
+    )
+    assert public_search.status_code == 200
+    assert public_search.get_json()["results"][0]["employee_number"] == "2001"
 
 
 def test_resolved_scene_substitute_request_replaces_source_entry(tmp_path):
@@ -2684,8 +2783,10 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "state.onEntryAssist" in ss_common_js
     assert "onEntryAssist: entryAssistEnabled ? openAssistSearchForEntry : null" in script
     assert "async function openAssistSearchForEntry" in script
-    # エントリ詳細からのサーチも、日付セルの「詳細」から開いたときと同じ検索条件にする。
-    assert "assistDaySearchPayload(day, assistSelectedShiftKeyForDay(day))" in script
+    # エントリ自身の時間帯を優先し、要代務では対象 entry と現場を検索APIへ渡す。
+    assert "assistDaySearchPayload(day, parsed.shift_key || assistSelectedShiftKeyForDay(day))" in script
+    assert "target_entry_id: entryId" in script
+    assert "target_site_row_id" in script
     assert "function assistTargetEntryIdFromContext" in script
     assert "function replaceAssistTargetEntryWithCandidate" in script
     assert "と入れ替える" in script
@@ -2764,6 +2865,15 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert ".assist-btn" in ss_common_css
     assert "entry-drag-handle" in ss_common_js
     assert "function moveEntry" in ss_common_js
+    assert "function copySingleEntry" in ss_common_js
+    assert "function pasteSingleEntry" in ss_common_js
+    assert "contextmenu', '.day-box'" in ss_common_js
+    assert "このシフトの後に貼り付け" in ss_common_js
+    assert ".ss-entry-context-menu" in ss_common_css
+    assert "state.mode === 'substitute' && entry.substitute_request_type === 'scene'" in ss_common_js
+    assert "project.mode === 'scene' || project.mode === 'substitute'" in script
+    assert "候補者をヘルプ担当に設定し、解決済みにしました" in script
+    assert "String(normalized.sync_source_type || '') === 'substitute_shift' && normalized.substitute_resolved" not in ss_common_js
     assert ".entry-item.is-drop-before" in ss_common_css
     assert ".day-box.branch-warning" in ss_common_css
     assert ".entry-item-status.is-warning" in ss_common_css

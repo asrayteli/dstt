@@ -2280,6 +2280,11 @@
       return project && project.mode === 'person' ? 'person' : 'scene';
     }
 
+    function isSubstituteAssistContext() {
+      const project = currentProject();
+      return !!(project && project.mode === 'substitute');
+    }
+
     function defaultAssistDataForMode(mode) {
       if (mode === 'person') {
         return {
@@ -2313,12 +2318,12 @@
 
     function isAssistAvailable() {
       const project = currentProject();
-      return !!project && (project.mode === 'scene' || project.mode === 'person') && (PAGE.type === 'owner' || PAGE.accessMode === 'edit');
+      return !!project && (project.mode === 'scene' || project.mode === 'person' || project.mode === 'substitute') && (PAGE.type === 'owner' || PAGE.accessMode === 'edit');
     }
 
     function assistBasePath() {
       const project = currentProject();
-      if (!project || (project.mode !== 'scene' && project.mode !== 'person')) return '';
+      if (!project || !['scene', 'person', 'substitute'].includes(project.mode)) return '';
       if (PAGE.type === 'owner') {
         return `/tools/shiftersync/cloudshift/api/project/${project.id}/assist`;
       }
@@ -2912,6 +2917,14 @@
       const templateTab = isTemplateFeatureAvailable()
         ? `<button type="button" class="cloud-tab${state.assist.activeTab === 'template' ? ' is-active' : ''}" data-assist-tab="template">テンプレート</button>`
         : '';
+      if (isSubstituteAssistContext()) {
+        return `
+          <div class="cloud-assist-tabs">
+            <button type="button" class="cloud-tab${state.assist.activeTab === 'search' ? ' is-active' : ''}" data-assist-tab="search">サーチ</button>
+            <button type="button" class="cloud-tab${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-tab="details">詳細</button>
+          </div>
+        `;
+      }
       if (mode === 'person') {
         return `
           <div class="cloud-assist-tabs">
@@ -2947,12 +2960,14 @@
     function normalizeAssistUiState() {
       const permissions = state.assist.permissions || {};
       const mode = currentAssistMode();
-      const allowedTabs = mode === 'person' ? ['register', 'edit', 'details'] : ['register', 'edit', 'people', 'search', 'details'];
+      const allowedTabs = isSubstituteAssistContext()
+        ? ['search', 'details']
+        : (mode === 'person' ? ['register', 'edit', 'details'] : ['register', 'edit', 'people', 'search', 'details']);
       if (isTemplateFeatureAvailable()) {
         allowedTabs.push('template');
       }
       if (!allowedTabs.includes(state.assist.activeTab)) {
-        state.assist.activeTab = 'register';
+        state.assist.activeTab = isSubstituteAssistContext() ? 'search' : 'register';
       }
       if (mode === 'person') {
         if (!['experienced', 'training'].includes(state.assist.registerView)) {
@@ -4794,6 +4809,18 @@
       const index = dayEntries.findIndex((entry) => String(entry && entry.id ? entry.id : '') === entryId);
       if (index < 0) return false;
       const target = dayEntries[index];
+      if (isSubstituteAssistContext()) {
+        // 要代務では不足現場の行そのものを置き換えず、検索した人物をヘルプ担当へ
+        // 割り当てる。既存担当者がいる場合も同じフィールドを更新するため入れ替えになる。
+        dayEntries[index] = Object.assign({}, target, {
+          substitute_helper_employee_name: name,
+          substitute_helper_employee_number: String(candidate && candidate.employee_number ? candidate.employee_number : '').trim(),
+          substitute_resolved: true,
+          substitute_unassigned_helper: false
+        });
+        replaceCalendarEntries(nextEntries);
+        return true;
+      }
       // オプション・コメント・第二オプション・枝番号・並び順はそのまま。
       // 差し替えるのは表示名と社員番号だけにする。
       const shiftKey = String(parseCalendarAssistEntry(target).shift_key || '');
@@ -4813,8 +4840,13 @@
         return '<button type="button" class="cloud-btn secondary" disabled>同日勤務あり</button>';
       }
       const replaceTarget = assistReplaceTargetEntry();
+      const substituteHelperName = replaceTarget && isSubstituteAssistContext()
+        ? String(replaceTarget.substitute_helper_employee_name || '').trim()
+        : '';
       const label = replaceTarget
-        ? `${assistReplaceTargetLabel(replaceTarget) || `${day}日のエントリ`}と入れ替える`
+        ? (isSubstituteAssistContext()
+          ? (substituteHelperName ? `${substituteHelperName}と入れ替える` : 'ヘルプ担当に設定')
+          : `${assistReplaceTargetLabel(replaceTarget) || `${day}日のエントリ`}と入れ替える`)
         : `${day}日のシフトに追加`;
       return `
         <button
@@ -4828,7 +4860,12 @@
     function normalizeAssistSearchPayload(payload) {
       return {
         target_date: payload && payload.target_date ? payload.target_date : defaultAssistTargetDate(),
-        shift_key: payload && payload.shift_key ? payload.shift_key : ''
+        shift_key: payload && payload.shift_key ? payload.shift_key : '',
+        target_entry_id: payload && payload.target_entry_id ? payload.target_entry_id : '',
+        target_site_row_id: payload && payload.target_site_row_id ? payload.target_site_row_id : '',
+        target_site_id: payload && payload.target_site_id ? payload.target_site_id : '',
+        target_site_name: payload && payload.target_site_name ? payload.target_site_name : '',
+        substitute_request_type: payload && payload.substitute_request_type ? payload.substitute_request_type : ''
       };
     }
 
@@ -5493,7 +5530,9 @@
               showFlash('差し替え対象のエントリが見つかりませんでした', 'error');
               return;
             }
-            notifyAssistAction('エントリの名前を候補者に差し替えました。オプション・コメントはそのままです。保存ボタンで確定してください');
+            notifyAssistAction(isSubstituteAssistContext()
+              ? '候補者をヘルプ担当に設定し、解決済みにしました。保存ボタンで確定してください'
+              : 'エントリの名前を候補者に差し替えました。オプション・コメントはそのままです。保存ボタンで確定してください');
             return;
           }
           if (!appendAssistSearchResultToDay(candidate)) {
@@ -5605,7 +5644,7 @@
     async function openAssistModal(options) {
       const next = options || {};
       if (!isAssistAvailable()) {
-        showFlash('アシスト機能は scene / person モードで利用できます', 'info');
+        showFlash('アシスト機能は現場・個人・要代務シフトで利用できます', 'info');
         return;
       }
       const mode = currentAssistMode();
@@ -5666,12 +5705,27 @@
         showFlash('エントリからの候補サーチは現場シフトで利用できます', 'info');
         return;
       }
+      if (isSubstituteAssistContext() && String(entry.substitute_request_type || '') !== 'scene') {
+        showFlash('人物不足の要代務では、行ける人の候補サーチは利用できません', 'info');
+        return;
+      }
       const parsed = parseCalendarAssistEntry(entry);
       // 検索条件は日付セルの「詳細」→「アシスト」から開いたときと同じにする。
       // 同日競合の判定はここで渡すオプションに左右されるため、入口によって
       // 結果が変わらないようにそろえておく。差し替え時はエントリ自身の
       // オプション・コメント・並び順をそのまま残す。
-      const searchPayload = assistDaySearchPayload(day, assistSelectedShiftKeyForDay(day));
+      const searchPayload = Object.assign(
+        assistDaySearchPayload(day, parsed.shift_key || assistSelectedShiftKeyForDay(day)),
+        isSubstituteAssistContext()
+          ? {
+            target_entry_id: entryId,
+            target_site_row_id: String(entry.site_row_id || ''),
+            target_site_id: String(entry.site_id || ''),
+            target_site_name: String(entry.site_name || parsed.candidate_name || ''),
+            substitute_request_type: String(entry.substitute_request_type || '')
+          }
+          : {}
+      );
       await openAssistModal({
         activeTab: 'search',
         recordDraft: null,
@@ -7729,10 +7783,10 @@
         && editable
         && projectAccessRole(project) !== 'viewer'
         && (project.mode === 'scene' || project.mode === 'person');
-      // エントリ詳細からアシストの候補サーチを開けるのは、候補サーチが使える
-      // 現場シフトを編集しているときだけ（アシスト自体は公開編集URLからも使える）。
+      // エントリ詳細からの候補サーチは現場シフトと要代務シフトで使う。
+      // 要代務では現場不足の行だけを ss_common 側で入口表示する。
       const entryAssistEnabled = editable
-        && project.mode === 'scene'
+        && (project.mode === 'scene' || project.mode === 'substitute')
         && projectAccessRole(project) !== 'viewer'
         && (PAGE.type === 'owner' || PAGE.accessMode === 'edit');
       const leaveChangeRequestEnabled = PAGE.type === 'public'
