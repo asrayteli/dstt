@@ -127,8 +127,6 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
 .qm-kv-title, .qm-box-title { font-size:14px; font-weight:800; margin:0 0 6px; }
 .qm-kv-table { width:100%; border-collapse:collapse; table-layout:fixed; }
 .qm-kv-table td { border:1px solid #333; padding:6px 9px; font-size:13px; line-height:1.55; vertical-align:top; word-break:break-word; }
-.qm-kv-table td.k { width:24%; }
-.qm-kv-table td.k.shade { background:#f5f6f8; }
 .qm-box-area { border:1px solid #333; min-height:220px; padding:10px 12px; font-size:13px; line-height:1.7; }
 .qm-cols { display:flex; gap:16px; }
 .qm-col { flex:1; min-width:0; font-size:13px; line-height:1.7; word-break:break-word; }
@@ -149,10 +147,39 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
 .qm-items-table tfoot td { font-weight:700; }
 .qm-items-table tfoot td.flabel { text-align:right; }
 .qm-items-addrow { display:none; margin-top:6px; }
-.qm-app:not(.previewing) .qm-block.selected .qm-items-addrow { display:flex; }
+.qm-app:not(.previewing) .qm-block.selected > .qm-block-inner > .qm-items-addrow { display:flex; }
 .qm-items-addrow button { flex:1; height:26px; border:1px dashed #93c5fd; border-radius:6px; background:#eff6ff;
   color:#2563eb; font-size:.72rem; font-weight:700; cursor:pointer; }
 .qm-items-addrow button:hover { background:#dbeafe; }
+
+/* ---- 2段組の列にブロック（明細表・差出人など）を入れるためのスタイル ---- */
+.qm-coltext { min-height:1.5em; }
+.qm-col-addrow { display:none; margin-top:6px; }
+/* 段組み自身を選んでいるときに加え、その列の中のブロックを選んでいる間も
+   「＋ ○列目にブロック」を出しておく（続けて反対の列にも入れられるように） */
+.qm-app:not(.previewing) .qm-block.selected > .qm-block-inner > .qm-cols > .qm-col > .qm-col-addrow,
+.qm-app:not(.previewing) .qm-block.ancestor-selected > .qm-block-inner > .qm-cols > .qm-col > .qm-col-addrow { display:block; }
+.qm-col-addrow button { width:100%; height:24px; border:1px dashed #93c5fd; border-radius:6px; background:#eff6ff;
+  color:#2563eb; font-size:.7rem; font-weight:700; cursor:pointer; }
+.qm-col-addrow button:hover { background:#dbeafe; }
+
+/* ---- 項目表（行・列の追加とセル結合） ---- */
+.qm-tbl-tools { display:none; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.qm-app:not(.previewing) .qm-block.selected > .qm-block-inner > .qm-tbl-tools { display:flex; }
+.qm-tbl-tools button { height:24px; padding:0 9px; border:1px dashed #93c5fd; border-radius:6px; background:#eff6ff;
+  color:#2563eb; font-size:.7rem; font-weight:700; cursor:pointer; white-space:nowrap; }
+.qm-tbl-tools button:hover { background:#dbeafe; }
+.qm-tbl-tools button.danger { border-color:#fecaca; background:#fef2f2; color:#dc2626; }
+.qm-tbl-tools button.danger:hover { background:#fee2e2; }
+.qm-app:not(.previewing) .qm-kv-table td.qm-cellsel { box-shadow:inset 0 0 0 2px #2563eb;
+  background-image:linear-gradient(rgba(37,99,235,.09),rgba(37,99,235,.09)); }
+
+/* ---- ブロックの種類を選ぶポップアップ ---- */
+.qm-blockmenu { position:fixed; z-index:85; display:flex; flex-direction:column; gap:2px; padding:6px; min-width:196px;
+  background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 12px 34px rgba(15,23,42,.22); }
+.qm-blockmenu button { text-align:left; height:30px; padding:0 10px; border:none; border-radius:6px; background:transparent;
+  font-size:.78rem; font-weight:700; color:#334155; cursor:pointer; white-space:nowrap; }
+.qm-blockmenu button:hover { background:#eef2ff; color:#4338ca; }
 
 /* 改ページ位置のめやすガイド（編集時のみ表示・印刷には出さない） */
 .qm-page-guide { position:absolute; left:0; right:0; border-top:2px dashed #60a5fa; pointer-events:none; z-index:6; }
@@ -214,8 +241,16 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
 .qm-issuer-item .acts { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
 .qm-badge-default { font-size:.62rem; font-weight:800; color:#047857; background:#d1fae5; padding:2px 7px; border-radius:9999px; }
 .qm-issuer-form { border:1px solid #dbe3ec; border-radius:10px; padding:12px; margin-top:8px; background:#f8fafc; }
-.qm-if-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-.qm-if-grid .full { grid-column:1 / -1; }
+.qm-if-list { display:flex; flex-direction:column; gap:6px; }
+.qm-if-row { border:1px solid #e2e8f0; border-radius:8px; padding:6px; background:#fff; }
+.qm-if-row .line { display:flex; align-items:center; gap:4px; }
+.qm-if-row .qm-inp { height:28px; font-size:.74rem; }
+.qm-if-row .lab { flex:0 0 33%; min-width:0; }
+.qm-if-row .val { flex:1; min-width:0; }
+.qm-if-row .opts { display:flex; flex-wrap:wrap; gap:9px; margin-top:6px; padding-top:6px; border-top:1px dashed #e2e8f0; }
+.qm-if-row .opt { display:flex; align-items:center; gap:4px; font-size:.7rem; font-weight:700; color:#475569; cursor:pointer; }
+.qm-if-preview { border:1px solid #e2e8f0; border-radius:8px; padding:9px 11px; background:#fff; font-size:.76rem;
+  line-height:1.7; max-height:170px; overflow:auto; }
 .qm-toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:90; background:#0f172a; color:#fff;
   padding:10px 18px; border-radius:9px; font-size:.82rem; font-weight:700; box-shadow:0 8px 24px rgba(0,0,0,.28);
   opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; }
@@ -250,7 +285,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   .qm-workspace { display:block !important; }
   /* シートの外側（キャンバスのグレー背景）が紙面に印字されないよう白にする */
   .qm-canvas { padding:0 !important; overflow:visible !important; display:block !important; background:#fff !important; }
-  .qm-page-guide, .qm-items-addrow { display:none !important; }
+  .qm-page-guide, .qm-items-addrow, .qm-col-addrow, .qm-tbl-tools, .qm-blockmenu { display:none !important; }
+  .qm-kv-table td.qm-cellsel { box-shadow:none !important; background-image:none !important; }
   .qm-zoombar { display:none !important; }
   .qm-sheet-wrap { transform:none !important; }
   /* 画面編集時は 297mm の紙面に見せるが、印刷では内容の高さに合わせて
@@ -299,7 +335,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
           <div class="qm-add-grid">
             <button class="qm-add-btn" data-add="text"><span class="ico">🅣</span>テキスト</button>
             <button class="qm-add-btn" data-add="heading"><span class="ico">🅷</span>大見出し</button>
-            <button class="qm-add-btn" data-add="columns"><span class="ico">▥</span>2段組</button>
+            <button class="qm-add-btn" data-add="columns"><span class="ico">▥</span>段組み（2〜4列）</button>
             <button class="qm-add-btn" data-add="table"><span class="ico">▦</span>項目表</button>
             <button class="qm-add-btn" data-add="items"><span class="ico">🧮</span>明細表（自動計算）</button>
             <button class="qm-add-btn" data-add="box"><span class="ico">▢</span>記入枠</button>
@@ -309,6 +345,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
             <button class="qm-add-btn" id="btnAddIssuer" style="grid-column:1 / -1"><span class="ico">🏢</span>差出人（基本情報を挿入）</button>
           </div>
           <p class="qm-hint">追加したブロックはドラッグ（左の⋮⋮）で並べ替えできます。選択中は Delete で削除、Ctrl+D で複製、Alt+↑↓ で移動、Ctrl+ホイールで拡大縮小できます。</p>
+          <p class="qm-hint">「段組み」を追加してから、各列に出る「＋ ○列目にブロック」を押すと、左に明細表・右に差出人のように列の中へブロックを入れられます。</p>
         </div>
       </div>
       <div class="qm-sec">
@@ -345,7 +382,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       </div>
       <div class="qm-sheet-wrap" id="sheetWrap">
         <div class="qm-sheet" id="sheet">
-          <div class="qm-sheet-inner" id="sheetInner"></div>
+          <div class="qm-sheet-inner" id="sheetInner" data-blocks="root"></div>
         </div>
       </div>
     </div>
@@ -424,7 +461,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       <button class="qm-tb-btn" style="background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnCloseIssuer">閉じる</button>
     </div>
     <div class="qm-modal-body">
-      <p class="qm-hint" style="margin-bottom:8px">営業所・住所・電話番号などをここに登録しておくと、「差出人」ブロックでワンクリック挿入できます。保存先はこのブラウザ（この端末）です。</p>
+      <p class="qm-hint" style="margin-bottom:8px">営業所・住所・電話番号などをここに登録しておくと、「差出人」ブロックでワンクリック挿入できます。項目名も内容も自由に決められ、項目はいくつでも足せます。保存先はこのブラウザ（この端末）です。</p>
       <div id="issuerListBody"></div>
       <div id="issuerFormWrap"></div>
       <button class="qm-tb-btn" style="width:100%;background:#2563eb;color:#fff;border-color:#2563eb;margin-top:8px" id="btnNewIssuer">＋ 新しい差出人を登録</button>
@@ -434,12 +471,509 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
 
 <div class="qm-toast" id="toast"></div>
 
+<!-- =====================================================================
+     Quote Maker の純粋ロジック（DOM に依存しない部分）
+       - 項目表（行・列・セル結合）の操作
+       - 差出人（基本情報）の自由項目の正規化と整形
+       - 2段組に入れ子になったブロックの探索
+     ここは画面（DOM）やブラウザAPIを一切使わないため、
+     tests/test_quote_maker_core.py から Node で読み込んで単体テストできる。
+     ===================================================================== -->
+<script>
+/* QM_CORE_BEGIN */
+(function(root){
+  'use strict';
+
+  /* ---------------- 共通ユーティリティ ---------------- */
+  function esc(s){
+    return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function uid(prefix){ return (prefix||'b')+Math.random().toString(36).slice(2,9); }
+  function num(v, dflt){ const n=Number(v); return isFinite(n)?n:dflt; }
+  function int1(v){ const n=parseInt(v,10); return (isFinite(n)&&n>=1)?n:1; }
+  function stripTags(s){ return String(s==null?'':s).replace(/<br\s*\/?>/gi,'\n').replace(/<[^>]*>/g,''); }
+
+  // 表・入れ子の暴走を防ぐ上限（保存サイズと描画コストの両方を抑える）
+  const MAX_COLS=30, MAX_ROWS=300, MAX_NEST_DEPTH=4;
+
+  /* ==================================================================
+     ブロック探索（2段組の列に入れ子になったブロックも辿る）
+     ================================================================== */
+  function colsOf(b){
+    return (b && b.type==='columns' && b.content && Array.isArray(b.content.cols)) ? b.content.cols : null;
+  }
+  function walkBlocks(blocks, fn, parent){
+    const list = Array.isArray(blocks) ? blocks : [];
+    for(let i=0;i<list.length;i++){
+      const b=list[i];
+      if(!b || typeof b!=='object') continue;
+      fn(b, list, i, parent||null);
+      const cols=colsOf(b);
+      if(cols){
+        for(const col of cols){ if(col && Array.isArray(col.blocks)) walkBlocks(col.blocks, fn, b); }
+      }
+    }
+  }
+  /** id のブロックとその所属配列・位置・親ブロックを返す（無ければ null）。 */
+  function locateIn(blocks, id){
+    if(!id) return null;
+    let found=null;
+    walkBlocks(blocks, function(b, list, i, parent){
+      if(!found && b.id===id) found={block:b, list:list, index:i, parent:parent};
+    });
+    return found;
+  }
+  /** ルート直下を 0 とした入れ子の深さ（見つからなければ -1）。 */
+  function depthOf(blocks, id){
+    let depth=-1;
+    (function scan(list, d){
+      for(const b of (Array.isArray(list)?list:[])){
+        if(!b || typeof b!=='object') continue;
+        if(b.id===id){ depth=d; return true; }
+        const cols=colsOf(b);
+        if(cols){
+          for(const col of cols){
+            if(col && Array.isArray(col.blocks) && scan(col.blocks, d+1)) return true;
+          }
+        }
+      }
+      return false;
+    })(blocks, 0);
+    return depth;
+  }
+  /** block 自身またはその子孫に id があるか（自分自身の中への移動を防ぐ判定用）。 */
+  function subtreeHas(block, id){
+    if(!block) return false;
+    if(block.id===id) return true;
+    const cols=colsOf(block);
+    if(!cols) return false;
+    for(const col of cols){
+      if(col && Array.isArray(col.blocks) && locateIn(col.blocks, id)) return true;
+    }
+    return false;
+  }
+
+  /* ==================================================================
+     項目表（table）: 行・列とセル結合をもつ表
+       content = { columns:[{width}], rows:[{cells:[cell]}], ... }
+       cell    = { html, cs, rs, covered, shade, bold, align }
+     cs/rs は colspan/rowspan、covered=true は結合に飲み込まれて
+     描画しないセル。covered は cs/rs から常に再計算するため、
+     どんな操作をしても表の形が壊れない。
+     ================================================================== */
+  function tblCell(src){
+    src=(src && typeof src==='object') ? src : {};
+    const align=src.align;
+    return {
+      html: (typeof src.html==='string') ? src.html : '',
+      cs: int1(src.cs), rs: int1(src.rs),
+      covered: !!src.covered,
+      shade: !!src.shade,
+      bold: !!src.bold,
+      align: (align==='center'||align==='right'||align==='left') ? align : ''
+    };
+  }
+  function emptyCell(){ return tblCell({}); }
+
+  function isGridTable(c){
+    return !!(c && Array.isArray(c.columns) && c.columns.length
+              && Array.isArray(c.rows) && c.rows.length
+              && c.rows.every(function(r){ return r && Array.isArray(r.cells); }));
+  }
+  /** 旧形式（rows:[{label,value}] + labelWidth）を行列形式へ移行する。 */
+  function migrateTable(c){
+    const lw=Math.max(5, Math.min(90, num(c.labelWidth, 24)));
+    const shade=!!c.labelShade;
+    const rows=(Array.isArray(c.rows)?c.rows:[]).map(function(r){
+      return { cells:[
+        tblCell({html:(r && typeof r.label==='string')?r.label:'', shade:shade}),
+        tblCell({html:(r && typeof r.value==='string')?r.value:''})
+      ]};
+    });
+    if(!rows.length) rows.push({cells:[tblCell({shade:shade}), emptyCell()]});
+    c.columns=[{width:Math.round(lw*10)/10}, {width:Math.round((100-lw)*10)/10}];
+    c.rows=rows;
+    delete c.labelWidth; delete c.labelShade;
+    return c;
+  }
+  /** 表の内部構造を整える（欠損補完・上限クランプ・結合の再計算）。 */
+  function normalizeTable(c){
+    if(!c || typeof c!=='object') return c;
+    const gridRows = Array.isArray(c.rows) && c.rows.length
+                     && c.rows.every(function(r){ return r && Array.isArray(r.cells); });
+    if(!gridRows){
+      migrateTable(c);
+    }else if(!Array.isArray(c.columns) || !c.columns.length){
+      // 行はセル形式なのに列の定義だけ欠けている場合は、セル数から作り直す
+      let w=1;
+      c.rows.forEach(function(r){ w=Math.max(w, r.cells.length); });
+      c.columns=[];
+      for(let i=0;i<w;i++) c.columns.push({width:100/w});
+    }
+    let n=c.columns.length;
+    c.rows.forEach(function(r){ if(!Array.isArray(r.cells)) r.cells=[]; n=Math.max(n, r.cells.length); });
+    n=Math.max(1, Math.min(n, MAX_COLS));
+    const widths=c.columns.slice(0,n).map(function(col){ return num(col && col.width, NaN); });
+    while(widths.length<n) widths.push(NaN);
+    for(let i=0;i<n;i++){ if(!isFinite(widths[i]) || widths[i]<=0) widths[i]=100/n; }
+    c.columns=widths.map(function(w){ return {width: Math.round(w*10)/10}; });
+    if(!c.rows.length) c.rows=[{cells:[]}];
+    c.rows=c.rows.slice(0,MAX_ROWS).map(function(r){
+      const cells=(Array.isArray(r.cells)?r.cells:[]).slice(0,n).map(tblCell);
+      while(cells.length<n) cells.push(emptyCell());
+      return {cells:cells};
+    });
+    recomputeSpans(c);
+    return c;
+  }
+  /** cs/rs から covered を作り直し、はみ出す結合を切り詰める。 */
+  function recomputeSpans(c){
+    const R=c.rows.length, C=c.columns.length;
+    const taken=new Array(R*C).fill(false);
+    for(let r=0;r<R;r++){
+      const cells=c.rows[r].cells;
+      for(let x=0;x<C;x++){
+        const cell=cells[x];
+        if(taken[r*C+x]){ cell.covered=true; cell.cs=1; cell.rs=1; continue; }
+        cell.covered=false;
+        let cs=Math.max(1, Math.min(int1(cell.cs), C-x));
+        for(let dx=1; dx<cs; dx++){ if(taken[r*C+x+dx]){ cs=dx; break; } }
+        let rs=Math.max(1, Math.min(int1(cell.rs), R-r));
+        for(let dr=1; dr<rs; dr++){
+          let blocked=false;
+          for(let dx=0; dx<cs; dx++){ if(taken[(r+dr)*C+x+dx]){ blocked=true; break; } }
+          if(blocked){ rs=dr; break; }
+        }
+        cell.cs=cs; cell.rs=rs;
+        for(let dr=0; dr<rs; dr++){
+          for(let dx=0; dx<cs; dx++){ if(dr||dx) taken[(r+dr)*C+x+dx]=true; }
+        }
+      }
+    }
+    return c;
+  }
+  /** (r,x) を覆っている実体セル（結合の左上）を返す。 */
+  function anchorAt(c, r, x){
+    if(!c || !c.rows || r<0 || x<0 || r>=c.rows.length || x>=c.columns.length) return null;
+    for(let rr=r; rr>=0; rr--){
+      for(let xx=x; xx>=0; xx--){
+        const cell=c.rows[rr] && c.rows[rr].cells[xx];
+        if(!cell || cell.covered) continue;
+        if(rr+cell.rs>r && xx+cell.cs>x) return {r:rr, c:xx, cell:cell};
+      }
+    }
+    return null;
+  }
+  /** 選択矩形を、結合セルがはみ出さない長方形まで広げる。 */
+  function expandRect(c, rect){
+    const R=c.rows.length, C=c.columns.length;
+    let r1=Math.max(0, Math.min(rect.r1, rect.r2));
+    let r2=Math.min(R-1, Math.max(rect.r1, rect.r2));
+    let c1=Math.max(0, Math.min(rect.c1, rect.c2));
+    let c2=Math.min(C-1, Math.max(rect.c1, rect.c2));
+    if(r1>r2 || c1>c2) return null;
+    let changed=true, guard=0;
+    while(changed && guard++ < (R+C+4)){
+      changed=false;
+      for(let r=r1;r<=r2;r++){
+        for(let x=c1;x<=c2;x++){
+          const a=anchorAt(c,r,x); if(!a) continue;
+          const nr1=Math.min(r1,a.r), nc1=Math.min(c1,a.c);
+          const nr2=Math.max(r2, a.r+a.cell.rs-1), nc2=Math.max(c2, a.c+a.cell.cs-1);
+          if(nr1!==r1||nc1!==c1||nr2!==r2||nc2!==c2){ r1=nr1;c1=nc1;r2=nr2;c2=nc2; changed=true; }
+        }
+      }
+    }
+    return {r1:r1, c1:c1, r2:r2, c2:c2};
+  }
+  /** 矩形を1つのセルに結合する（中身は改行でつなぐ）。変化があれば true。 */
+  function mergeCells(c, rect){
+    normalizeTable(c);
+    const R=expandRect(c, rect);
+    if(!R) return false;
+    if(R.r1===R.r2 && R.c1===R.c2) return false;
+    const head=c.rows[R.r1].cells[R.c1];
+    const parts=[];
+    for(let r=R.r1;r<=R.r2;r++){
+      for(let x=R.c1;x<=R.c2;x++){
+        const cell=c.rows[r].cells[x];
+        const h=String(cell.html||'').trim();
+        if(h && stripTags(h).trim()) parts.push(h);
+        if(!(r===R.r1 && x===R.c1)){ cell.html=''; cell.cs=1; cell.rs=1; cell.covered=true; }
+      }
+    }
+    head.html=parts.join('<br>');
+    head.cs=R.c2-R.c1+1; head.rs=R.r2-R.r1+1; head.covered=false;
+    recomputeSpans(c);
+    return true;
+  }
+  /** 矩形内の結合を解除する。変化があれば true。 */
+  function splitCells(c, rect){
+    normalizeTable(c);
+    const R=expandRect(c, rect);
+    if(!R) return false;
+    let changed=false;
+    for(let r=R.r1;r<=R.r2;r++){
+      for(let x=R.c1;x<=R.c2;x++){
+        const cell=c.rows[r].cells[x];
+        if(!cell.covered && (cell.cs>1 || cell.rs>1)){ cell.cs=1; cell.rs=1; changed=true; }
+      }
+    }
+    recomputeSpans(c);
+    return changed;
+  }
+  function insertRow(c, at){
+    normalizeTable(c);
+    if(c.rows.length>=MAX_ROWS) return false;
+    const C=c.columns.length;
+    at=Math.max(0, Math.min(parseInt(at,10)||0, c.rows.length));
+    if(at>0 && at<c.rows.length){
+      // 挿入位置をまたぐ縦結合は、1行ぶん背を伸ばす
+      const seen={};
+      for(let x=0;x<C;x++){
+        const a=anchorAt(c, at, x);
+        if(a && a.r<at && !seen[a.r+','+a.c]){ seen[a.r+','+a.c]=1; a.cell.rs+=1; }
+      }
+    }
+    const cells=[]; for(let x=0;x<C;x++) cells.push(emptyCell());
+    c.rows.splice(at, 0, {cells:cells});
+    recomputeSpans(c);
+    return true;
+  }
+  function insertCol(c, at){
+    normalizeTable(c);
+    if(c.columns.length>=MAX_COLS) return false;
+    const C=c.columns.length;
+    at=Math.max(0, Math.min(parseInt(at,10)||0, C));
+    if(at>0 && at<C){
+      const seen={};
+      for(let r=0;r<c.rows.length;r++){
+        const a=anchorAt(c, r, at);
+        if(a && a.c<at && !seen[a.r+','+a.c]){ seen[a.r+','+a.c]=1; a.cell.cs+=1; }
+      }
+    }
+    const avg=c.columns.reduce(function(s,k){ return s+num(k.width,0); },0)/Math.max(1,C);
+    c.columns.splice(at, 0, {width: Math.max(2, Math.round(avg*10)/10)});
+    c.rows.forEach(function(r){ r.cells.splice(at, 0, emptyCell()); });
+    rescaleColumns(c);
+    recomputeSpans(c);
+    return true;
+  }
+  function deleteRow(c, at){
+    normalizeTable(c);
+    if(c.rows.length<=1) return false;
+    const C=c.columns.length, R=c.rows.length;
+    at=Math.max(0, Math.min(parseInt(at,10)||0, R-1));
+    // この行から始まる縦結合は、中身と残りの高さを下の行へ引き継ぐ
+    if(at+1<R){
+      for(let x=0;x<C;x++){
+        const cell=c.rows[at].cells[x];
+        if(cell.covered || cell.rs<=1) continue;
+        const below=c.rows[at+1].cells[x];
+        below.html=cell.html; below.cs=cell.cs; below.rs=cell.rs-1; below.covered=false;
+        below.shade=cell.shade; below.bold=cell.bold; below.align=cell.align;
+      }
+    }
+    // この行をまたぐ縦結合は1行ぶん縮める
+    const seen={};
+    for(let x=0;x<C;x++){
+      const a=anchorAt(c, at, x);
+      if(a && a.r<at && !seen[a.r+','+a.c]){ seen[a.r+','+a.c]=1; a.cell.rs=Math.max(1, a.cell.rs-1); }
+    }
+    c.rows.splice(at, 1);
+    recomputeSpans(c);
+    return true;
+  }
+  function deleteCol(c, at){
+    normalizeTable(c);
+    if(c.columns.length<=1) return false;
+    const C=c.columns.length;
+    at=Math.max(0, Math.min(parseInt(at,10)||0, C-1));
+    if(at+1<C){
+      for(let r=0;r<c.rows.length;r++){
+        const cell=c.rows[r].cells[at];
+        if(cell.covered || cell.cs<=1) continue;
+        const right=c.rows[r].cells[at+1];
+        right.html=cell.html; right.cs=cell.cs-1; right.rs=cell.rs; right.covered=false;
+        right.shade=cell.shade; right.bold=cell.bold; right.align=cell.align;
+      }
+    }
+    const seen={};
+    for(let r=0;r<c.rows.length;r++){
+      const a=anchorAt(c, r, at);
+      if(a && a.c<at && !seen[a.r+','+a.c]){ seen[a.r+','+a.c]=1; a.cell.cs=Math.max(1, a.cell.cs-1); }
+    }
+    c.columns.splice(at, 1);
+    c.rows.forEach(function(r){ r.cells.splice(at, 1); });
+    rescaleColumns(c);
+    recomputeSpans(c);
+    return true;
+  }
+  function moveRow(c, from, dir){
+    normalizeTable(c);
+    const to=from+dir;
+    if(from<0 || from>=c.rows.length || to<0 || to>=c.rows.length) return false;
+    // 結合をまたぐ入れ替えは形が崩れるため、対象の2行が縦結合に絡む場合は行わない
+    const R=Math.min(from,to), R2=Math.max(from,to);
+    for(let x=0;x<c.columns.length;x++){
+      for(let r=R;r<=R2;r++){
+        const a=anchorAt(c, r, x);
+        if(a && (a.cell.rs>1)) return false;
+      }
+    }
+    const t=c.rows[from]; c.rows[from]=c.rows[to]; c.rows[to]=t;
+    recomputeSpans(c);
+    return true;
+  }
+  /** 列幅の合計が 100 になるよう比率を保ったまま調整する。 */
+  function rescaleColumns(c){
+    const n=c.columns.length;
+    if(!n) return c;
+    if(n===1){ c.columns[0].width=100; return c; }
+    const ws=c.columns.map(function(k){ return Math.max(0.1, num(k.width, 0) || 0.1); });
+    const sum=ws.reduce(function(a,b){ return a+b; }, 0) || 1;
+    let acc=0;
+    for(let i=0;i<n-1;i++){
+      c.columns[i].width=Math.max(1, Math.round(ws[i]/sum*1000)/10);
+      acc+=c.columns[i].width;
+    }
+    c.columns[n-1].width=Math.max(1, Math.round((100-acc)*10)/10);
+    return c;
+  }
+  /** 表を作る（列数・行数を指定、ラベル列つきの既定形） */
+  function makeTableContent(labels, opts){
+    opts=opts||{};
+    const lw=num(opts.labelWidth, 26);
+    const c={ columns:[{width:lw},{width:Math.round((100-lw)*10)/10}], rows:[] };
+    (labels||[]).forEach(function(l){
+      c.rows.push({cells:[ tblCell({html:esc(String(l==null?'':l)), shade:!!opts.shade}), emptyCell() ]});
+    });
+    if(!c.rows.length) c.rows.push({cells:[emptyCell(), emptyCell()]});
+    return normalizeTable(c);
+  }
+
+  /* ==================================================================
+     差出人（基本情報）: 項目名も並びも自由に編集できる可変フィールド
+       profile = { id, name, fields:[{id,label,value,showLabel,size,bold,sameLine,seal}] }
+     旧形式（company/office/zip/address/tel/fax/rep/seal）は
+     読み込み時に fields へ移行する。
+     ================================================================== */
+  const ISSUER_SIZES=['sm','md','lg'];
+  function issuerField(src){
+    src=(src && typeof src==='object') ? src : {};
+    return {
+      id: String(src.id || uid('f')),
+      label: String(src.label==null?'':src.label).slice(0,60),
+      value: String(src.value==null?'':src.value).slice(0,300),
+      showLabel: !!src.showLabel,
+      size: ISSUER_SIZES.indexOf(src.size)>=0 ? src.size : 'md',
+      bold: !!src.bold,
+      sameLine: !!src.sameLine,
+      seal: !!src.seal
+    };
+  }
+  /** 旧形式のプロファイルを可変フィールド形式へ移行する（表示結果は同じ）。 */
+  function issuerFieldsOf(p){
+    p=p||{};
+    if(Array.isArray(p.fields)) return p.fields.map(issuerField);
+    const out=[];
+    function add(label, value, opt){
+      const v=String(value==null?'':value).trim();
+      if(!v) return;
+      out.push(issuerField(Object.assign({label:label, value:v}, opt||{})));
+    }
+    add('会社名', p.company, {size:'lg', bold:true});
+    add('営業所', p.office, {size:'lg', bold:true, sameLine: out.length>0});
+    const zip=String(p.zip==null?'':p.zip).trim();
+    add('郵便番号', zip?('〒'+zip):'', {});
+    add('住所', p.address, {sameLine: out.length>0 && !!zip});
+    add('TEL', p.tel, {showLabel:true});
+    add('FAX', p.fax, {showLabel:true});
+    add('営業担当', p.rep, {showLabel:true, seal: p.seal!==false});
+    return out;
+  }
+  /** 半角ラベルは半角スペース、全角ラベルは全角スペースで値と区切る。 */
+  function labelSep(label){ return /^[\x20-\x7E]+$/.test(label) ? ' ' : '　'; }
+  /** 差出人プロファイルを見積書へ差し込む HTML にする。 */
+  function issuerHtml(p){
+    const lines=[];
+    issuerFieldsOf(p).forEach(function(f){
+      const val=String(f.value||'').trim();
+      const lab=String(f.label||'').trim();
+      if(!val) return;                       // 値が空の項目は出力しない
+      let text='';
+      if(f.showLabel && lab) text += esc(lab) + labelSep(lab);
+      text += esc(val);
+      if(f.seal) text += ' ㊞';
+      const st=[];
+      if(f.size==='lg') st.push('font-size:15px');
+      if(f.size==='sm') st.push('font-size:12px');
+      if(f.bold) st.push('font-weight:700');
+      if(st.length) text='<span style="'+st.join(';')+';">'+text+'</span>';
+      if(f.sameLine && lines.length) lines[lines.length-1] += '　'+text;
+      else lines.push(text);
+    });
+    return lines.join('<br>');
+  }
+  /** 一覧に出す差出人の要約テキスト（HTMLタグを除いた行の並び）。 */
+  function issuerPreviewText(p){
+    const t=stripTags(issuerHtml(p)).replace(/　/g,' ').trim();
+    return t;
+  }
+  /** 保存前にプロファイルを正規化する（可変フィールド形式へ統一）。 */
+  function normalizeIssuer(p){
+    p=p||{};
+    const fields=issuerFieldsOf(p).slice(0,40);
+    const name=String(p.name==null?'':p.name).trim().slice(0,80);
+    const first=fields.find(function(f){ return String(f.value||'').trim(); });
+    return {
+      id: String(p.id || uid('i')),
+      name: name || (first ? String(first.value).trim().slice(0,40) : '差出人'),
+      fields: fields
+    };
+  }
+  function defaultIssuerFields(){
+    return [
+      issuerField({label:'会社名',   value:'', size:'lg', bold:true}),
+      issuerField({label:'営業所',   value:'', size:'lg', bold:true, sameLine:true}),
+      issuerField({label:'郵便番号', value:''}),
+      issuerField({label:'住所',     value:'', sameLine:true}),
+      issuerField({label:'TEL',      value:'', showLabel:true}),
+      issuerField({label:'FAX',      value:'', showLabel:true}),
+      issuerField({label:'営業担当', value:'', showLabel:true, seal:true})
+    ];
+  }
+
+  root.QM_CORE = {
+    esc:esc, uid:uid, stripTags:stripTags,
+    MAX_COLS:MAX_COLS, MAX_ROWS:MAX_ROWS, MAX_NEST_DEPTH:MAX_NEST_DEPTH,
+    colsOf:colsOf, walkBlocks:walkBlocks, locateIn:locateIn, depthOf:depthOf, subtreeHas:subtreeHas,
+    tblCell:tblCell, emptyCell:emptyCell, isGridTable:isGridTable, normalizeTable:normalizeTable,
+    recomputeSpans:recomputeSpans, anchorAt:anchorAt, expandRect:expandRect,
+    mergeCells:mergeCells, splitCells:splitCells,
+    insertRow:insertRow, insertCol:insertCol, deleteRow:deleteRow, deleteCol:deleteCol,
+    moveRow:moveRow, rescaleColumns:rescaleColumns, makeTableContent:makeTableContent,
+    issuerField:issuerField, issuerFieldsOf:issuerFieldsOf, issuerHtml:issuerHtml,
+    issuerPreviewText:issuerPreviewText, normalizeIssuer:normalizeIssuer,
+    defaultIssuerFields:defaultIssuerFields, labelSep:labelSep
+  };
+})(typeof window!=='undefined' ? window : globalThis);
+/* QM_CORE_END */
+</script>
+
 <script>
 (function(){
   'use strict';
   const API = '/tools/quote_maker/api/quotes';
   const TPL_API = '/tools/quote_maker/api/templates';
   const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+
+  // 画面に依存しない処理（項目表の行列操作・差出人の整形・入れ子ブロックの探索）は
+  // 上の QM_CORE にまとめてあり、Node から単体テストしている。
+  const CORE = window.QM_CORE;
+  const normalizeTable = CORE.normalizeTable;
+  const makeTableContent = CORE.makeTableContent;
+  const issuerHtml = CORE.issuerHtml;
 
   // 親コンテンツ領域の余白を除去してエディタを全幅・全高で使う。
   (function neutralizeShell(){
@@ -479,6 +1013,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
      ------------------------------------------------------------------ */
   let state = { id:null, title:'', doc:null };
   let selectedId = null;
+  let cellSel = null;      // 項目表のセル選択 {id, ar, ac, r1, c1, r2, c2}
+  let cellDrag = null;     // セル選択をドラッグしているときの起点
   let dirty = false;
   let saving = false;
   let saveTimer = null;
@@ -579,7 +1115,6 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   // 運行費用見積書の「記入用ひな形」。項目名（ラベル）だけを持ち、
   // 値・差出人・金額は空欄。個人情報や実データは一切含めない。
   function unyouSkeletonDoc(){
-    const emptyRows = (labels)=> labels.map(l=>({label:l, value:''}));
     return {
       version:1,
       page:basePage(),
@@ -599,11 +1134,11 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
         { id:uid(), type:'text', style:baseStyle({fontSize:13, marginBottom:12}),
           content:{ html:'（お見積書の有効期間は 　 日間とさせていただきます。）' } },
         { id:uid(), type:'table', style:baseStyle({marginBottom:12, fontSize:13}),
-          content:{ title:'【基本事項】', labelWidth:24, labelShade:false, borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9,
-            rows: emptyRows(['1.契約期間','2.運行コース','3.運行日時','4.走行距離','5.車両仕様','6.営業拠点']) } },
+          content:Object.assign({ title:'【基本事項】', borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9 },
+            makeTableContent(['1.契約期間','2.運行コース','3.運行日時','4.走行距離','5.車両仕様','6.営業拠点'], {labelWidth:24})) },
         { id:uid(), type:'table', style:baseStyle({marginBottom:14, fontSize:13}),
-          content:{ title:'【その他料金等】', labelWidth:30, labelShade:false, borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9,
-            rows: emptyRows(['1.超過料金','2.早朝・深夜割増料金','3.超過走行','4.有料道路代','5.駐車場代','6.宿泊雑費']) } },
+          content:Object.assign({ title:'【その他料金等】', borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9 },
+            makeTableContent(['1.超過料金','2.早朝・深夜割増料金','3.超過走行','4.有料道路代','5.駐車場代','6.宿泊雑費'], {labelWidth:30})) },
         { id:uid(), type:'box', style:baseStyle({marginBottom:6}),
           content:{ title:'【特記】', html:'', minHeight:120, borderColor:'#333333', borderWidth:1 } }
       ]
@@ -636,8 +1171,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
             taxRate:10, taxMode:'excluded', rounding:'floor',
             borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:8 } },
         { id:uid(), type:'table', style:baseStyle({marginBottom:14, fontSize:13}),
-          content:{ title:'【お取引条件】', labelWidth:24, labelShade:false, borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9,
-            rows:[{label:'見積有効期限', value:''},{label:'お支払条件', value:''},{label:'納期・実施日', value:''}] } },
+          content:Object.assign({ title:'【お取引条件】', borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9 },
+            makeTableContent(['見積有効期限','お支払条件','納期・実施日'], {labelWidth:24})) },
         { id:uid(), type:'box', style:baseStyle({marginBottom:6}),
           content:{ title:'【特記】', html:'', minHeight:90, borderColor:'#333333', borderWidth:1 } }
       ]
@@ -705,49 +1240,41 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       const wrap = el('div','qm-cols');
       wrap.style.gap = (c.gap==null?16:c.gap)+'px';
       (c.cols||[]).forEach((col,i)=>{
+        if(!col || typeof col!=='object') return;
         const cel = el('div','qm-col');
         cel.style.flex = (col.width||50)+' 0 0';
         cel.style.textAlign = col.align||'left';
         cel.style.fontSize = (col.fontSize||13)+'px';
-        cel.setAttribute('data-ce','col:'+i);
-        cel.setAttribute('contenteditable','true');
-        if(!col.html) cel.setAttribute('data-ph', col.ph || '入力');
-        cel.innerHTML = col.html||'';
+        const nested = Array.isArray(col.blocks) ? col.blocks : [];
+        if(nested.length){
+          // この列にはブロック（明細表・差出人など）が入っている
+          const host = el('div','qm-colblocks');
+          host.setAttribute('data-blocks','col');
+          host.setAttribute('data-block-id', b.id);
+          host.setAttribute('data-col-index', String(i));
+          nested.forEach(nb=> host.appendChild(renderBlock(nb)));
+          cel.appendChild(host);
+        }else{
+          const txt = el('div','qm-coltext');
+          txt.setAttribute('data-ce','col:'+i);
+          txt.setAttribute('contenteditable','true');
+          if(!col.html) txt.setAttribute('data-ph', col.ph || '入力');
+          txt.innerHTML = col.html||'';
+          cel.appendChild(txt);
+        }
+        // 選択中だけ出る「この列にブロックを入れる」ボタン（印刷・プレビューには出ない）
+        const addWrap = el('div','qm-col-addrow');
+        const addBtn = el('button'); addBtn.type='button';
+        addBtn.textContent='＋ '+(i+1)+'列目にブロック';
+        addBtn.setAttribute('data-act','col-add'); addBtn.setAttribute('data-col', String(i));
+        addWrap.appendChild(addBtn);
+        cel.appendChild(addWrap);
         wrap.appendChild(cel);
       });
       setCss(wrap, {lineHeight:s.lineHeight||1.7});
       inner.appendChild(wrap);
     } else if(b.type==='table'){
-      if(c.title!=null){
-        const h = el('div','qm-kv-title');
-        h.setAttribute('data-ce','title'); h.setAttribute('contenteditable','true');
-        if(!c.title) h.setAttribute('data-ph','見出し');
-        h.innerHTML = c.title;
-        if(s.fontSize) h.style.fontSize = Math.max(14,(s.fontSize+1))+'px';
-        inner.appendChild(h);
-      }
-      const table = el('table','qm-kv-table');
-      const tb = el('tbody');
-      const bc = c.borderColor||'#333', bw=(c.borderWidth==null?1:c.borderWidth);
-      (c.rows||[]).forEach((row,i)=>{
-        const tr = el('tr');
-        const kd = el('td','k'+(c.labelShade?' shade':''));
-        kd.style.width = (c.labelWidth||24)+'%';
-        kd.style.border = bw+'px solid '+bc;
-        kd.style.padding = (c.cellPadY||6)+'px '+(c.cellPadX||9)+'px';
-        if(s.fontSize) kd.style.fontSize = s.fontSize+'px';
-        kd.setAttribute('data-ce','cell:label:'+i); kd.setAttribute('contenteditable','true');
-        kd.innerHTML = row.label||'';
-        const vd = el('td','v');
-        vd.style.border = bw+'px solid '+bc;
-        vd.style.padding = (c.cellPadY||6)+'px '+(c.cellPadX||9)+'px';
-        if(s.fontSize) vd.style.fontSize = s.fontSize+'px';
-        vd.setAttribute('data-ce','cell:value:'+i); vd.setAttribute('contenteditable','true');
-        vd.innerHTML = row.value||'';
-        tr.appendChild(kd); tr.appendChild(vd); tb.appendChild(tr);
-      });
-      table.appendChild(tb);
-      inner.appendChild(table);
+      renderTableInner(inner, b);
     } else if(b.type==='items'){
       renderItemsInner(inner, b);
     } else if(b.type==='box'){
@@ -795,6 +1322,65 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       inner.querySelectorAll('[data-ce]').forEach(n=>n.setAttribute('contenteditable','false'));
     }
     return inner;
+  }
+
+  /* 項目表（行・列を自由に足せる表）の描画。
+     結合で隠れるセル（covered）は描画せず、実体のセルに colspan/rowspan を付ける。 */
+  function renderTableInner(inner, b){
+    const s=b.style||{}, c=b.content||{};
+    normalizeTable(c);
+    if(c.title!=null){
+      const h = el('div','qm-kv-title');
+      h.setAttribute('data-ce','title'); h.setAttribute('contenteditable','true');
+      if(!c.title) h.setAttribute('data-ph','見出し');
+      h.innerHTML = c.title;
+      if(s.fontSize) h.style.fontSize = Math.max(14,(s.fontSize+1))+'px';
+      inner.appendChild(h);
+    }
+    const bc=c.borderColor||'#333', bw=(c.borderWidth==null?1:c.borderWidth);
+    const pad=(c.cellPadY==null?6:c.cellPadY)+'px '+(c.cellPadX==null?9:c.cellPadX)+'px';
+    const table = el('table','qm-kv-table');
+    // 列幅は比率で持ち、描画時に合計100%へ割り付ける
+    const total = c.columns.reduce((a,k)=>a+(k.width||0),0) || 1;
+    const cg = el('colgroup');
+    c.columns.forEach(k=>{ const co=el('col'); co.style.width=((k.width||0)/total*100).toFixed(3)+'%'; cg.appendChild(co); });
+    table.appendChild(cg);
+    const tb = el('tbody');
+    c.rows.forEach((row,r)=>{
+      const tr = el('tr');
+      row.cells.forEach((cell,x)=>{
+        if(cell.covered) return;
+        const td = el('td');
+        if(cell.cs>1) td.colSpan=cell.cs;
+        if(cell.rs>1) td.rowSpan=cell.rs;
+        td.style.border = bw+'px solid '+bc;
+        td.style.padding = pad;
+        if(s.fontSize) td.style.fontSize = s.fontSize+'px';
+        if(cell.shade) td.style.background='#f5f6f8';
+        if(cell.bold) td.style.fontWeight='700';
+        if(cell.align) td.style.textAlign=cell.align;
+        td.setAttribute('data-r', String(r));
+        td.setAttribute('data-c', String(x));
+        td.setAttribute('data-ce','tcell:'+r+':'+x);
+        td.setAttribute('contenteditable','true');
+        td.innerHTML = cell.html||'';
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    inner.appendChild(table);
+
+    // 選択中だけ出る行・列・結合の操作（印刷・プレビューには出ない）
+    const tools = el('div','qm-tbl-tools');
+    [['tbl-addrow','＋ 行'],['tbl-addcol','＋ 列'],['tbl-merge','セルを結合'],
+     ['tbl-split','結合を解除'],['tbl-delrow','行を削除'],['tbl-delcol','列を削除']].forEach(pair=>{
+      const btn=el('button'); btn.type='button'; btn.textContent=pair[1];
+      btn.setAttribute('data-act', pair[0]);
+      if(pair[0]==='tbl-delrow'||pair[0]==='tbl-delcol') btn.className='danger';
+      tools.appendChild(btn);
+    });
+    inner.appendChild(tools);
   }
 
   /* 明細表（自動計算）の描画。金額・小計・消費税・合計は編集不可の自動計算値。 */
@@ -935,6 +1521,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     const inner = $('#sheetInner');
     inner.innerHTML='';
     state.doc.blocks.forEach(b=> inner.appendChild(renderBlock(b)));
+    paintCellSel();
     // 内容量に応じてズーム用ラッパーの高さを更新（新しい末尾までスクロールできるように）
     if(typeof applyZoom==='function') applyZoom();
   }
@@ -943,13 +1530,41 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   function refreshBlockElement(id){
     const b = findBlock(id); if(!b) return;
     const wrap = $('.qm-block[data-id="'+id+'"]'); if(!wrap) return;
-    const old = wrap.querySelector('.qm-block-inner');
-    const fresh = renderBlockInner(b);
-    wrap.replaceChild(fresh, old);
+    // 入れ子のブロックの inner を掴まないよう、直下の子だけを探す
+    let old=null;
+    for(const kid of wrap.children){ if(kid.classList.contains('qm-block-inner')){ old=kid; break; } }
+    if(!old) return;
+    wrap.replaceChild(renderBlockInner(b), old);
+    paintCellSel();
   }
 
-  function findBlock(id){ return state.doc.blocks.find(b=>b.id===id); }
-  function findIndex(id){ return state.doc.blocks.findIndex(b=>b.id===id); }
+  /* ブロックの探索。2段組の列に入れ子になったブロックも辿る。 */
+  function locate(id){ return CORE.locateIn(state.doc.blocks, id); }
+  function findBlock(id){ const l=locate(id); return l ? l.block : undefined; }
+  function findIndex(id){ const l=locate(id); return l ? l.index : -1; }
+  /* ブロックを画面内へ送る。scrollIntoView はページ全体（ツールバーを含む殻）まで
+     動かしてしまうため、キャンバスの中だけをスクロールさせる。 */
+  function scrollToBlock(id){
+    const node=$('.qm-block[data-id="'+id+'"]'), canvas=$('#canvas');
+    if(!node || !canvas) return;
+    const r=node.getBoundingClientRect(), cr=canvas.getBoundingClientRect();
+    const top=canvas.scrollTop + (r.top - cr.top) - Math.max(0, (canvas.clientHeight - r.height)/2);
+    canvas.scrollTo({top:Math.max(0, top), behavior:'smooth'});
+  }
+  /* 入力中のセルなどが隠れていたら、キャンバスの中だけを動かして見えるようにする */
+  function ensureVisibleInCanvas(node){
+    const canvas=$('#canvas');
+    if(!node || !canvas) return;
+    const r=node.getBoundingClientRect(), cr=canvas.getBoundingClientRect();
+    if(r.top < cr.top+10) canvas.scrollTop += (r.top - cr.top) - 10;
+    else if(r.bottom > cr.bottom-10) canvas.scrollTop += (r.bottom - cr.bottom) + 10;
+  }
+  /* ページ全体を動かさずに編集位置へ移す */
+  function focusEditable(node){
+    if(!node) return;
+    try{ node.focus({preventScroll:true}); }catch(_){ node.focus(); }
+    ensureVisibleInCanvas(node);
+  }
 
   /* ------------------------------------------------------------------
      History (undo/redo)
@@ -976,7 +1591,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     state.title = o.title; state.doc = o.doc;
     $('#docTitle').value = state.title;
     render(); buildPageSettings();
-    if(keepSel && state.doc.blocks.some(b=>b.id===keepSel)) selectBlock(keepSel); else selectBlock(null);
+    if(keepSel && locate(keepSel)) selectBlock(keepSel); else selectBlock(null);
   }
   function updateHistoryButtons(){
     $('#btnUndo').disabled = undoStack.length===0;
@@ -1037,7 +1652,16 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
      ------------------------------------------------------------------ */
   function selectBlock(id){
     selectedId = id;
-    document.querySelectorAll('.qm-block').forEach(n=> n.classList.toggle('selected', n.getAttribute('data-id')===id));
+    if(cellSel && cellSel.id!==id) cellSel=null;
+    document.querySelectorAll('.qm-block').forEach(n=>{
+      n.classList.toggle('selected', n.getAttribute('data-id')===id);
+      n.classList.remove('ancestor-selected');
+    });
+    // 選んだブロックを囲む段組みにも印を付ける（列の追加ボタンを出し続けるため）
+    const node = id ? $('.qm-block[data-id="'+id+'"]') : null;
+    let up = node && node.parentElement ? node.parentElement.closest('.qm-block') : null;
+    while(up){ up.classList.add('ancestor-selected'); up = up.parentElement ? up.parentElement.closest('.qm-block') : null; }
+    paintCellSel();
     buildInspector();
   }
 
@@ -1090,6 +1714,36 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     f.appendChild(cb); f.appendChild(t); return f;
   }
 
+  function miniBtn(label, on, danger){
+    const btn=el('button','qm-mini'+(danger?' danger':''));
+    btn.textContent=label;
+    btn.style.cssText='flex:1;min-width:0;white-space:nowrap;font-size:.7rem';
+    btn.addEventListener('click', on);
+    return btn;
+  }
+  /* 選んだ範囲（結合を含めて広げた長方形）にある実体セルを集める */
+  function cellsIn(c, rect){
+    const out=[];
+    const R=CORE.expandRect(c, rect); if(!R) return out;
+    for(let r=R.r1;r<=R.r2;r++){
+      for(let x=R.c1;x<=R.c2;x++){
+        const cell=c.rows[r] && c.rows[r].cells[x];
+        if(cell && !cell.covered) out.push(cell);
+      }
+    }
+    return out;
+  }
+  /* 選んだセルへまとめて見た目を設定する */
+  function applyCells(b, rect, fn){
+    const picked=cellsIn(b.content, rect);
+    if(!picked.length) return;
+    picked.forEach(fn);
+    refreshBlockElement(b.id); commit(false); buildInspector();
+  }
+
+  const BLOCK_NAMES={text:'テキスト',heading:'大見出し',columns:'段組み',table:'項目表',
+    items:'明細表（自動計算）',box:'記入枠',divider:'区切り線',spacer:'余白',image:'画像'};
+
   function commonStyleControls(b){
     const frag = document.createDocumentFragment();
     const s = b.style;
@@ -1127,10 +1781,15 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     const frag = document.createDocumentFragment();
     const c = b.content;
     if(b.type==='columns'){
-      frag.appendChild(ctrlField('列数', segment([[2,'2列'],[3,'3列']], (c.cols||[]).length, v=>{
+      frag.appendChild(ctrlField('列数', segment([[2,'2列'],[3,'3列'],[4,'4列']], (c.cols||[]).length, v=>{
         const cur=c.cols||[]; if(v===cur.length) return;
-        if(v>cur.length){ while(c.cols.length<v) c.cols.push({width:100/v, align:'left', fontSize:13, html:''}); }
-        else { c.cols = cur.slice(0,v); }
+        if(v>cur.length){ while(c.cols.length<v) c.cols.push({width:100/v, align:'left', fontSize:13, html:'', blocks:[]}); }
+        else {
+          // 減らす列に中身（ブロックや文字）があるときだけ確認する
+          const lost=cur.slice(v).some(col=> (Array.isArray(col.blocks)&&col.blocks.length) || CORE.stripTags(col.html||'').trim());
+          if(lost && !confirm('減らす列に入っている内容も消えます。よろしいですか？')){ buildInspector(); return; }
+          c.cols = cur.slice(0,v);
+        }
         c.cols.forEach(col=> col.width = +(100/v).toFixed(1));
         commit(); selectBlock(b.id);
       })));
@@ -1143,39 +1802,118 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
         r.appendChild(ctrlField('文字px', numInput(col.fontSize||13,6,60,1, v=>{ col.fontSize=v; refreshBlockElement(b.id); commit(false);})));
         box.appendChild(r);
         box.appendChild(ctrlField('配置', segment([['left','左'],['center','中'],['right','右']], col.align||'left', v=>{ col.align=v; refreshBlockElement(b.id); commit(false);})));
+        // この列に入れたブロック（明細表・差出人など）の一覧
+        const nested=Array.isArray(col.blocks)?col.blocks:[];
+        const nl=el('label'); nl.textContent='この列の中身';
+        nl.style.cssText='display:block;font-size:.72rem;font-weight:700;color:#475569;margin:9px 0 4px';
+        box.appendChild(nl);
+        if(!nested.length){
+          const note=el('p','qm-hint'); note.textContent='いまは文字を直接書き込む列です。'; box.appendChild(note);
+        }else{
+          const list=el('div','qm-rowlist');
+          nested.forEach((nb,j)=>{
+            const it=el('div','qm-rowitem');
+            const nm=el('button','qm-mini'); nm.textContent=(BLOCK_NAMES[nb.type]||nb.type);
+            nm.title='このブロックを選ぶ';
+            nm.style.cssText='flex:1;min-width:0;overflow:hidden;white-space:nowrap;font-size:.7rem';
+            nm.addEventListener('click',()=>{ selectBlock(nb.id); scrollToBlock(nb.id); });
+            it.appendChild(nm);
+            const up=el('button','qm-mini'); up.textContent='↑'; up.title='上へ'; up.disabled=(j===0);
+            up.addEventListener('click',()=>{ moveBlock(nb.id,-1); selectBlock(b.id); });
+            const dn=el('button','qm-mini'); dn.textContent='↓'; dn.title='下へ'; dn.disabled=(j===nested.length-1);
+            dn.addEventListener('click',()=>{ moveBlock(nb.id,1); selectBlock(b.id); });
+            const rm=el('button','qm-mini danger'); rm.textContent='×'; rm.title='この列から削除';
+            rm.addEventListener('click',()=>{ removeBlock(nb.id); selectBlock(b.id); });
+            it.appendChild(up); it.appendChild(dn); it.appendChild(rm);
+            list.appendChild(it);
+          });
+          box.appendChild(list);
+        }
+        const add=el('button','qm-mini'); add.textContent='＋ この列にブロックを入れる';
+        add.style.cssText='margin-top:6px;width:100%;font-size:.7rem';
+        add.addEventListener('click',()=> openBlockMenu(add, b.id, i));
+        box.appendChild(add);
         frag.appendChild(box);
       });
+      const ch=el('p','qm-hint');
+      ch.textContent='列の中にブロックを入れると、左に明細表・右に差出人といった並べ方ができます。ブロックは「⋮⋮」をつかんで、列の間や紙面へドラッグして移せます。';
+      frag.appendChild(ch);
     } else if(b.type==='table'){
-      frag.appendChild(ctrlField('ラベル列幅(%)', numInput(c.labelWidth||24,8,70,1, v=>{ c.labelWidth=v; refreshBlockElement(b.id); commit(false);})));
-      frag.appendChild(checkRow('ラベル列に背景色', !!c.labelShade, v=>{ c.labelShade=v; refreshBlockElement(b.id); commit(false);}));
+      normalizeTable(c);
+      const rect=tableRect(b);
+      const info=el('p','qm-hint');
+      info.textContent=c.rows.length+' 行 × '+c.columns.length+' 列';
+      frag.appendChild(info);
+
+      // 行と列
+      const gbox=el('div','qm-field');
+      const gl=el('label'); gl.textContent='行と列'; gbox.appendChild(gl);
+      const g1=el('div','qm-row2');
+      g1.appendChild(miniBtn('＋ 行を追加', ()=> runTableAction(b.id,'tbl-addrow')));
+      g1.appendChild(miniBtn('＋ 列を追加', ()=> runTableAction(b.id,'tbl-addcol')));
+      gbox.appendChild(g1);
+      const g2=el('div','qm-row2'); g2.style.marginTop='5px';
+      g2.appendChild(miniBtn('選んだ行を ↑', ()=> moveTableRow(b.id, -1)));
+      g2.appendChild(miniBtn('選んだ行を ↓', ()=> moveTableRow(b.id, 1)));
+      gbox.appendChild(g2);
+      const g3=el('div','qm-row2'); g3.style.marginTop='5px';
+      g3.appendChild(miniBtn('選んだ行を削除', ()=> runTableAction(b.id,'tbl-delrow'), true));
+      g3.appendChild(miniBtn('選んだ列を削除', ()=> runTableAction(b.id,'tbl-delcol'), true));
+      gbox.appendChild(g3);
+      frag.appendChild(gbox);
+
+      // セルの結合
+      const mbox=el('div','qm-field');
+      const ml=el('label'); ml.textContent='セルの結合'; mbox.appendChild(ml);
+      const m1=el('div','qm-row2');
+      m1.appendChild(miniBtn('セルを結合', ()=> runTableAction(b.id,'tbl-merge')));
+      m1.appendChild(miniBtn('結合を解除', ()=> runTableAction(b.id,'tbl-split')));
+      mbox.appendChild(m1);
+      const mh=el('p','qm-hint');
+      mh.textContent='表の上でセルをドラッグ（または Shift+クリック）して範囲を選んでから押してください。';
+      mbox.appendChild(mh);
+      frag.appendChild(mbox);
+
+      // 選んだセルの見た目
+      const sbox=el('div','qm-field');
+      const sl=el('label');
+      sl.textContent='選んだセル（'+(rect.r1+1)+'行'+(rect.c1+1)+'列'
+        + ((rect.r1!==rect.r2||rect.c1!==rect.c2) ? (' 〜 '+(rect.r2+1)+'行'+(rect.c2+1)+'列') : '') + '）';
+      sbox.appendChild(sl);
+      const picked=cellsIn(c, rect);
+      const head=picked[0]||CORE.emptyCell();
+      sbox.appendChild(checkRow('背景色を付ける', picked.length>0 && picked.every(x=>x.shade), v=> applyCells(b, rect, x=>{ x.shade=v; })));
+      sbox.appendChild(checkRow('太字', picked.length>0 && picked.every(x=>x.bold), v=> applyCells(b, rect, x=>{ x.bold=v; })));
+      sbox.appendChild(ctrlField('文字の位置', segment([['','既定'],['left','左'],['center','中'],['right','右']], head.align||'', v=> applyCells(b, rect, x=>{ x.align=v; }))));
+      frag.appendChild(sbox);
+
+      // 列幅
+      const wbox=el('div','qm-field');
+      const wl=el('label'); wl.textContent='列幅（比率）'; wbox.appendChild(wl);
+      const wlist=el('div','qm-rowlist');
+      c.columns.forEach((col,i)=>{
+        const it=el('div','qm-rowitem');
+        const tag=el('span'); tag.textContent=(i+1)+'列'; tag.style.cssText='font-size:.7rem;font-weight:700;color:#94a3b8;min-width:28px';
+        it.appendChild(tag);
+        const inp=numInput(col.width,1,100,0.5, v=>{ col.width=v; refreshBlockElement(b.id); commit(false); });
+        inp.style.height='28px'; inp.style.flex='1'; inp.style.minWidth='0';
+        it.appendChild(inp);
+        wlist.appendChild(it);
+      });
+      wbox.appendChild(wlist);
+      const wh=el('p','qm-hint'); wh.textContent='合計が100になるように割り付けて表示します。';
+      wbox.appendChild(wh);
+      frag.appendChild(wbox);
+
       const r=el('div','qm-row2');
       r.appendChild(ctrlField('罫線太さ', numInput(c.borderWidth==null?1:c.borderWidth,0,6,1, v=>{ c.borderWidth=v; refreshBlockElement(b.id); commit(false);})));
       r.appendChild(ctrlField('罫線色', colorCtrl(c.borderColor||'#333', v=>{ c.borderColor=v; refreshBlockElement(b.id); commit(false);})));
       frag.appendChild(r);
       const r2=el('div','qm-row2');
       r2.appendChild(ctrlField('文字px', numInput(b.style.fontSize||13,8,40,1, v=>{ b.style.fontSize=v; refreshBlockElement(b.id); commit(false);})));
-      r2.appendChild(ctrlField('セル余白', numInput(c.cellPadY||6,0,24,1, v=>{ c.cellPadY=v; refreshBlockElement(b.id); commit(false);})));
+      r2.appendChild(ctrlField('セル余白', numInput(c.cellPadY==null?6:c.cellPadY,0,24,1, v=>{ c.cellPadY=v; refreshBlockElement(b.id); commit(false);})));
       frag.appendChild(r2);
-      // rows management
-      const rl=el('div','qm-field'); const ll=el('label'); ll.textContent='行の編集'; rl.appendChild(ll);
-      const list=el('div','qm-rowlist');
-      (c.rows||[]).forEach((row,i)=>{
-        const it=el('div','qm-rowitem');
-        const grip=el('span','grip'); grip.textContent='⋮'; it.appendChild(grip);
-        const lab=el('input','lbl'); lab.value=(row.label||'').replace(/<[^>]+>/g,''); lab.placeholder='ラベル';
-        lab.addEventListener('input',()=>{ row.label=esc(lab.value); const cell=$('.qm-block[data-id="'+b.id+'"] [data-ce="cell:label:'+i+'"]'); if(cell&&document.activeElement!==cell) cell.innerHTML=row.label; markDirty(); });
-        it.appendChild(lab);
-        const up=el('button','qm-mini'); up.textContent='↑'; up.title='上へ'; up.addEventListener('click',()=>{ if(i>0){ const t=c.rows[i-1]; c.rows[i-1]=c.rows[i]; c.rows[i]=t; commit(); selectBlock(b.id);} });
-        const dn=el('button','qm-mini'); dn.textContent='↓'; dn.title='下へ'; dn.addEventListener('click',()=>{ if(i<c.rows.length-1){ const t=c.rows[i+1]; c.rows[i+1]=c.rows[i]; c.rows[i]=t; commit(); selectBlock(b.id);} });
-        const rm=el('button','qm-mini danger'); rm.textContent='×'; rm.title='行を削除'; rm.addEventListener('click',()=>{ c.rows.splice(i,1); commit(); selectBlock(b.id); });
-        it.appendChild(up); it.appendChild(dn); it.appendChild(rm);
-        list.appendChild(it);
-      });
-      rl.appendChild(list);
-      const add=el('button','qm-mini'); add.textContent='＋ 行を追加'; add.style.marginTop='6px'; add.style.width='100%';
-      add.addEventListener('click',()=>{ c.rows.push({label:'', value:''}); commit(); selectBlock(b.id); });
-      rl.appendChild(add);
-      frag.appendChild(rl);
+      frag.appendChild(checkRow('見出しを表示', c.title!=null, v=>{ c.title = v?(c.title||'見出し'):null; commit(); selectBlock(b.id); }));
     } else if(b.type==='items'){
       frag.appendChild(checkRow('御見積金額を上に大きく表示', !!c.banner, v=>{ c.banner=v; commit(); selectBlock(b.id); }));
       const rt=el('div','qm-row2');
@@ -1248,17 +1986,35 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     const box = $('#inspector'); box.innerHTML='';
     if(!selectedId){ box.innerHTML='<div class="qm-empty-note">ブロックをクリックすると、<br>ここで文字・色・罫線・余白などを<br>細かく編集できます。</div>'; return; }
     const b = findBlock(selectedId); if(!b){ box.innerHTML=''; return; }
-    const names={text:'テキスト',heading:'大見出し',columns:'2段組',table:'項目表',items:'明細表（自動計算）',box:'記入枠',divider:'区切り線',spacer:'余白',image:'画像'};
-    const hd=el('div'); hd.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 14px 4px';
-    const tt=el('div'); tt.textContent=names[b.type]||b.type; tt.style.cssText='font-size:.9rem;font-weight:800;color:#1f2933';
-    const idx=findIndex(b.id);
-    const nav=el('div'); nav.style.cssText='display:flex;gap:4px';
+    const loc=locate(b.id);
+    const idx=loc?loc.index:-1, siblings=loc?loc.list.length:0;
+    const hd=el('div');
+    hd.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:6px;padding:10px 14px 4px';
+    const tt=el('div');
+    tt.textContent=(BLOCK_NAMES[b.type]||b.type);
+    // ボタンが増えても見出しが押し出されないよう、長い名前は省略表示にする
+    tt.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+      + 'font-size:.9rem;font-weight:800;color:#1f2933';
+    tt.title=tt.textContent;
+    const nav=el('div'); nav.style.cssText='display:flex;gap:4px;flex:none';
+    if(loc && loc.parent){
+      // 段組みの中のブロックからは、囲んでいる段組みをすぐ選べるようにする
+      const pa=el('button','qm-mini'); pa.textContent='⤴'; pa.title='囲んでいる段組みを選ぶ';
+      pa.addEventListener('click',()=>{ selectBlock(loc.parent.id); scrollToBlock(loc.parent.id); });
+      nav.appendChild(pa);
+    }
     const up=el('button','qm-mini'); up.textContent='↑'; up.title='ひとつ上へ'; up.disabled=idx<=0; up.addEventListener('click',()=>moveBlock(b.id,-1));
-    const dn=el('button','qm-mini'); dn.textContent='↓'; dn.title='ひとつ下へ'; dn.disabled=idx>=state.doc.blocks.length-1; dn.addEventListener('click',()=>moveBlock(b.id,1));
+    const dn=el('button','qm-mini'); dn.textContent='↓'; dn.title='ひとつ下へ'; dn.disabled=idx<0||idx>=siblings-1; dn.addEventListener('click',()=>moveBlock(b.id,1));
     const dup=el('button','qm-mini'); dup.textContent='⧉'; dup.title='複製'; dup.addEventListener('click',()=>duplicateBlock(b.id));
     const del=el('button','qm-mini danger'); del.textContent='🗑'; del.title='削除'; del.addEventListener('click',()=>removeBlock(b.id));
     nav.appendChild(up); nav.appendChild(dn); nav.appendChild(dup); nav.appendChild(del);
     hd.appendChild(tt); hd.appendChild(nav); box.appendChild(hd);
+    if(loc && loc.parent){
+      const note=el('div');
+      note.textContent='段組みの中のブロックです（⤴ で段組みを選べます）';
+      note.style.cssText='padding:0 14px 4px;font-size:.68rem;font-weight:700;color:#94a3b8';
+      box.appendChild(note);
+    }
     const body=el('div'); body.style.padding='0 14px 20px';
     body.appendChild(typeSpecificControls(b));
     const sep=el('div'); sep.style.cssText='border-top:1px dashed #e2e8f0;margin:10px 0 4px'; body.appendChild(sep);
@@ -1274,7 +2030,12 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     if(type==='text'){ base.content={html:''}; base.style=baseStyle({fontSize:14}); }
     else if(type==='heading'){ base.content={html:'見出し'}; base.style=baseStyle({fontSize:20,bold:true,marginBottom:8}); }
     else if(type==='columns'){ base.content={gap:16, cols:[{width:50,align:'left',fontSize:13,html:''},{width:50,align:'right',fontSize:13,html:''}]}; }
-    else if(type==='table'){ base.content={title:'見出し', labelWidth:26, labelShade:false, borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9, rows:[{label:'項目',value:'内容'},{label:'項目',value:'内容'}]}; base.style=baseStyle({fontSize:13}); }
+    else if(type==='table'){
+      const tc=makeTableContent(['項目','項目'], {labelWidth:26});
+      tc.rows.forEach(r=>{ r.cells[1].html='内容'; });
+      base.content=Object.assign({title:'見出し', borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9}, tc);
+      base.style=baseStyle({fontSize:13});
+    }
     else if(type==='items'){
       const emptyItem=()=>({name:'', qty:'', unit:'', price:'', note:''});
       base.content={ title:null, banner:false, bannerLabel:'御見積金額',
@@ -1294,16 +2055,50 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   function addBlock(type){
     // プレビュー中に追加したら、編集を続けられるようプレビューを解除する
     if(isPreviewing()) setPreview(false);
+    // 選択中のブロックと同じ場所（段組みの列の中なら、その列）に足す
+    const loc = selectedId ? locate(selectedId) : null;
+    const list = loc ? loc.list : state.doc.blocks;
+    const idx  = loc ? loc.index+1 : state.doc.blocks.length;
+    if(type==='columns' && loc && CORE.depthOf(state.doc.blocks, selectedId)>=2){
+      toast('段組みをこれ以上入れ子にはできません'); return;
+    }
     const b = newBlock(type);
-    const idx = selectedId? findIndex(selectedId)+1 : state.doc.blocks.length;
-    state.doc.blocks.splice(idx,0,b);
+    list.splice(idx,0,b);
     commit(); selectBlock(b.id);
     if(isNarrow()) closePanels();
-    const node=$('.qm-block[data-id="'+b.id+'"]'); if(node) node.scrollIntoView({behavior:'smooth',block:'center'});
+    scrollToBlock(b.id);
   }
-  function removeBlock(id){ const i=findIndex(id); if(i<0) return; state.doc.blocks.splice(i,1); commit(); selectBlock(null); }
-  function duplicateBlock(id){ const i=findIndex(id); if(i<0) return; const copy=JSON.parse(JSON.stringify(state.doc.blocks[i])); copy.id=uid(); state.doc.blocks.splice(i+1,0,copy); commit(); selectBlock(copy.id); }
-  function moveBlock(id,dir){ const i=findIndex(id); const j=i+dir; if(j<0||j>=state.doc.blocks.length) return; const t=state.doc.blocks[i]; state.doc.blocks[i]=state.doc.blocks[j]; state.doc.blocks[j]=t; commit(); selectBlock(id); }
+  /* 複製したブロックのIDを付け直す（入れ子のブロックも重複しないように） */
+  function reassignIds(b){
+    if(!b || typeof b!=='object') return;
+    b.id=uid();
+    const cols=CORE.colsOf(b);
+    if(cols) cols.forEach(col=>{ if(col && Array.isArray(col.blocks)) col.blocks.forEach(reassignIds); });
+  }
+  function removeBlock(id){
+    const l=locate(id); if(!l) return;
+    // 段組みごと消すと列の中身もまとめて消えるため、先に知らせる
+    const cols=CORE.colsOf(l.block);
+    const nested=cols ? cols.reduce((n,col)=> n + ((col && Array.isArray(col.blocks)) ? col.blocks.length : 0), 0) : 0;
+    if(nested && !confirm('この段組みの中にあるブロック '+nested+' 個も一緒に消えます。削除しますか？')) return;
+    // 段組みの列の中のブロックを消したときは、その段組みを選んだままにする
+    // （続けて同じ列を編集しやすいように）
+    const parentId = l.parent ? l.parent.id : null;
+    l.list.splice(l.index,1);
+    commit(); selectBlock(parentId);
+  }
+  function duplicateBlock(id){
+    const l=locate(id); if(!l) return;
+    const copy=JSON.parse(JSON.stringify(l.block));
+    reassignIds(copy);
+    l.list.splice(l.index+1,0,copy); commit(); selectBlock(copy.id);
+  }
+  function moveBlock(id,dir){
+    const l=locate(id); if(!l) return;
+    const j=l.index+dir; if(j<0||j>=l.list.length) return;
+    const t=l.list[l.index]; l.list[l.index]=l.list[j]; l.list[j]=t;
+    commit(); selectBlock(id);
+  }
 
   /* ------------------------------------------------------------------
      Contenteditable sync
@@ -1328,7 +2123,12 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     else if(role==='box'){ b.content.html=html; }
     else if(role==='bannerLabel'){ b.content.bannerLabel=html; }
     else if(role && role.startsWith('col:')){ const i=+role.split(':')[1]; if(b.content.cols[i]) b.content.cols[i].html=html; }
-    else if(role && role.startsWith('cell:')){ const [,which,i]=role.split(':'); const row=b.content.rows[+i]; if(row){ row[which]=html; } }
+    else if(role && role.startsWith('tcell:')){
+      const parts=role.split(':');
+      const row=(b.content.rows||[])[+parts[1]];
+      const cell=(row && Array.isArray(row.cells)) ? row.cells[+parts[2]] : null;
+      if(cell) cell.html=html;
+    }
     else if(role && role.startsWith('head:')){ const k=role.split(':')[1]; b.content.heads=b.content.heads||{}; b.content.heads[k]=html; }
     else if(role && role.startsWith('item:')){
       const [,field,i]=role.split(':'); const row=b.content.rows[+i];
@@ -1369,8 +2169,164 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       commit(); selectBlock(id);
     }
     const target=$('.qm-block[data-id="'+id+'"] [data-ce="item:'+field+':'+next+'"]');
-    if(target){ target.focus(); }
+    focusEditable(target);
   });
+
+  /* ------------------------------------------------------------------
+     項目表のセル選択（結合や行・列の削除の対象をエクセルのように選ぶ）
+     ------------------------------------------------------------------ */
+  function parseCellRole(td){
+    const m=/^tcell:(\d+):(\d+)$/.exec(td.getAttribute('data-ce')||'');
+    const wrap=td.closest('.qm-block');
+    if(!m || !wrap) return null;
+    return { id:wrap.getAttribute('data-id'), r:+m[1], c:+m[2] };
+  }
+  function setCellSel(id, ar, ac, r, c){
+    cellSel={ id:id, ar:ar, ac:ac,
+              r1:Math.min(ar,r), r2:Math.max(ar,r), c1:Math.min(ac,c), c2:Math.max(ac,c) };
+    paintCellSel();
+  }
+  function clearCellSel(){ if(!cellSel) return; cellSel=null; paintCellSel(); }
+  /* 選んだセル（結合を含めて広げた長方形）に印を付ける */
+  function paintCellSel(){
+    document.querySelectorAll('#sheetInner td.qm-cellsel').forEach(n=>n.classList.remove('qm-cellsel'));
+    if(!cellSel) return;
+    const b=findBlock(cellSel.id);
+    if(!b || b.type!=='table' || !b.content || !Array.isArray(b.content.rows)){ cellSel=null; return; }
+    const R=b.content.rows.length, C=(b.content.columns||[]).length;
+    if(!R || !C){ cellSel=null; return; }
+    // 行や列を消したあとでも選択が表の外に出ないように収める
+    ['r1','r2','ar'].forEach(k=>{ cellSel[k]=Math.max(0, Math.min(cellSel[k], R-1)); });
+    ['c1','c2','ac'].forEach(k=>{ cellSel[k]=Math.max(0, Math.min(cellSel[k], C-1)); });
+    const rect=CORE.expandRect(b.content, cellSel);
+    if(!rect) return;
+    const wrap=$('.qm-block[data-id="'+cellSel.id+'"]'); if(!wrap) return;
+    for(let r=rect.r1;r<=rect.r2;r++){
+      for(let x=rect.c1;x<=rect.c2;x++){
+        const td=wrap.querySelector('td[data-r="'+r+'"][data-c="'+x+'"]');
+        if(td) td.classList.add('qm-cellsel');
+      }
+    }
+  }
+  /* 現在のセル選択（無ければ左上の1セル） */
+  function tableRect(b){
+    if(cellSel && cellSel.id===b.id) return {r1:cellSel.r1, c1:cellSel.c1, r2:cellSel.r2, c2:cellSel.c2};
+    return {r1:0, c1:0, r2:0, c2:0};
+  }
+  /* 表を書き換えて、その表だけ描き直す（他のブロックのカーソルを保つ） */
+  function tableOp(id, fn){
+    const b=findBlock(id); if(!b || b.type!=='table') return false;
+    normalizeTable(b.content);
+    const changed = fn(b.content);
+    normalizeTable(b.content);
+    refreshBlockElement(id);
+    commit(false);
+    buildInspector();
+    return changed!==false;
+  }
+  /* 選んだ行を1つ上／下へ動かす（縦の結合に絡む行は形が崩れるため動かさない） */
+  function moveTableRow(id, dir){
+    const b=findBlock(id); if(!b || b.type!=='table') return;
+    normalizeTable(b.content);
+    const rect=tableRect(b);
+    const from=(dir<0) ? rect.r1 : rect.r2;
+    const moved=tableOp(id, c=> CORE.moveRow(c, from, dir));
+    if(moved){
+      if(cellSel && cellSel.id===id){
+        ['r1','r2','ar'].forEach(k=>{ cellSel[k]=Math.max(0, cellSel[k]+dir); });
+        paintCellSel();
+      }
+      toast('行を移動しました');
+    }else{
+      toast('この行は移動できません（結合しているか、端の行です）');
+    }
+  }
+  function runTableAction(id, kind){
+    const b=findBlock(id); if(!b || b.type!=='table') return;
+    normalizeTable(b.content);
+    const rect=tableRect(b);
+    if(kind==='tbl-addrow'){
+      toast(tableOp(id, c=> CORE.insertRow(c, rect.r2+1)) ? '行を追加しました' : 'これ以上行を増やせません');
+    }else if(kind==='tbl-addcol'){
+      toast(tableOp(id, c=> CORE.insertCol(c, rect.c2+1)) ? '列を追加しました' : 'これ以上列を増やせません');
+    }else if(kind==='tbl-delrow'){
+      const n=rect.r2-rect.r1+1;
+      if(!confirm(n>1 ? ('選択した '+n+' 行を削除しますか？') : 'この行を削除しますか？')) return;
+      const done=tableOp(id, c=>{ let ok=false; for(let k=0;k<n;k++){ if(CORE.deleteRow(c, rect.r1)) ok=true; } return ok; });
+      toast(done ? '行を削除しました' : '最後の1行は削除できません');
+    }else if(kind==='tbl-delcol'){
+      const n=rect.c2-rect.c1+1;
+      if(!confirm(n>1 ? ('選択した '+n+' 列を削除しますか？') : 'この列を削除しますか？')) return;
+      const done=tableOp(id, c=>{ let ok=false; for(let k=0;k<n;k++){ if(CORE.deleteCol(c, rect.c1)) ok=true; } return ok; });
+      toast(done ? '列を削除しました' : '最後の1列は削除できません');
+    }else if(kind==='tbl-merge'){
+      toast(tableOp(id, c=> CORE.mergeCells(c, rect)) ? 'セルを結合しました'
+        : '結合するセルを2つ以上選んでください（ドラッグまたは Shift+クリック）');
+    }else if(kind==='tbl-split'){
+      toast(tableOp(id, c=> CORE.splitCells(c, rect)) ? '結合を解除しました' : '選んだ場所に結合はありません');
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     段組みの列へ入れるブロックを選ぶポップアップ
+     ------------------------------------------------------------------ */
+  const BLOCK_MENU=[
+    ['text','🅣 テキスト'], ['heading','🅷 大見出し'], ['table','▦ 項目表'],
+    ['items','🧮 明細表（自動計算）'], ['box','▢ 記入枠'], ['image','🖼 画像'],
+    ['divider','― 区切り線'], ['spacer','↕ 余白'], ['columns','▥ 段組み'],
+    ['__issuer','🏢 差出人（基本情報）']
+  ];
+  let blockMenuEl=null;
+  function closeBlockMenu(){ if(blockMenuEl){ blockMenuEl.remove(); blockMenuEl=null; } }
+  function openBlockMenu(anchor, blockId, colIndex){
+    closeBlockMenu();
+    const menu=el('div','qm-blockmenu');
+    BLOCK_MENU.forEach(pair=>{
+      const btn=el('button'); btn.type='button'; btn.textContent=pair[1];
+      btn.addEventListener('click',(ev)=>{ ev.stopPropagation(); closeBlockMenu(); addBlockToColumn(blockId, colIndex, pair[0]); });
+      menu.appendChild(btn);
+    });
+    document.body.appendChild(menu);
+    blockMenuEl=menu;
+    const r=anchor.getBoundingClientRect();
+    let top=r.bottom+6;
+    if(top+menu.offsetHeight > window.innerHeight-8) top=Math.max(8, r.top-menu.offsetHeight-6);
+    const left=Math.max(8, Math.min(r.left, window.innerWidth-menu.offsetWidth-8));
+    menu.style.top=top+'px'; menu.style.left=left+'px';
+  }
+  document.addEventListener('mousedown',(e)=>{
+    if(blockMenuEl && !(e.target.closest && e.target.closest('.qm-blockmenu'))) closeBlockMenu();
+  });
+  /* 段組みの指定した列にブロックを入れる（左に明細表・右に差出人、といった使い方） */
+  function addBlockToColumn(blockId, colIndex, type){
+    const loc=locate(blockId); if(!loc) return;
+    const col=((loc.block.content||{}).cols||[])[colIndex]; if(!col) return;
+    if(type==='columns' && CORE.depthOf(state.doc.blocks, blockId)>=1){
+      toast('段組みをこれ以上入れ子にはできません'); return;
+    }
+    if(isPreviewing()) setPreview(false);
+    if(!Array.isArray(col.blocks)) col.blocks=[];
+    // すでに列へ直接書いてある文字を失わないよう、テキストブロックへ移してから足す
+    if(!col.blocks.length && CORE.stripTags(col.html||'').trim()){
+      col.blocks.push({ id:uid(), type:'text',
+        style:baseStyle({align:col.align||'left', fontSize:col.fontSize||13, marginBottom:8}),
+        content:{ html:col.html } });
+      col.html='';
+    }
+    let nb;
+    if(type==='__issuer'){
+      const prof=issuerDefault();
+      if(!prof){ toast('先に「🏢 基本情報」で差出人を登録してください'); openIssuer(); return; }
+      nb={ id:uid(), type:'text',
+           style:baseStyle({align:col.align||'right', fontSize:13, marginBottom:8}),
+           content:{ html:issuerHtml(prof) } };
+    }else{
+      nb=newBlock(type);
+    }
+    col.blocks.push(nb);
+    commit(); selectBlock(nb.id); scrollToBlock(nb.id);
+    toast(type==='__issuer' ? '列に差出人を入れました' : '列にブロックを入れました');
+  }
 
   /* ------------------------------------------------------------------
      Sheet click: selection / delete
@@ -1392,16 +2348,88 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
           b.content.rows.push({name:'', qty:'', unit:'', price:'', note:''});
           commit(); selectBlock(id);
           const cell=$('.qm-block[data-id="'+id+'"] [data-ce="item:name:'+(b.content.rows.length-1)+'"]');
-          if(cell) cell.focus();
+          focusEditable(cell);
         }
       }
+      else if(kind==='col-add'){ openBlockMenu(act, id, +(act.getAttribute('data-col')||0)); }
+      else if(kind.indexOf('tbl-')===0){ runTableAction(id, kind); }
       return;
     }
     const wrap=e.target.closest('.qm-block'); if(wrap){ selectBlock(wrap.getAttribute('data-id')); }
   });
 
+  /* セルのドラッグ／Shift+クリックで範囲を選ぶ（結合・行列削除の対象） */
+  $('#sheetInner').addEventListener('mousedown',(e)=>{
+    if($('#qmApp').classList.contains('previewing')) return;
+    const td=e.target.closest ? e.target.closest('[data-ce^="tcell:"]') : null;
+    if(!td){
+      // 表の操作ボタンを押すときは選択したままにする
+      if(!(e.target.closest && e.target.closest('.qm-tbl-tools'))) clearCellSel();
+      return;
+    }
+    const info=parseCellRole(td); if(!info) return;
+    if(e.shiftKey && cellSel && cellSel.id===info.id){
+      e.preventDefault();
+      setCellSel(info.id, cellSel.ar, cellSel.ac, info.r, info.c);
+      const sel=window.getSelection(); if(sel) sel.removeAllRanges();
+      return;
+    }
+    cellSel={ id:info.id, ar:info.r, ac:info.c, r1:info.r, r2:info.r, c1:info.c, c2:info.c };
+    cellDrag={ id:info.id, ar:info.r, ac:info.c };
+    paintCellSel();
+  });
+  $('#sheetInner').addEventListener('mouseover',(e)=>{
+    if(!cellDrag) return;
+    const td=e.target.closest ? e.target.closest('[data-ce^="tcell:"]') : null;
+    if(!td) return;
+    const info=parseCellRole(td);
+    if(!info || info.id!==cellDrag.id) return;
+    if(info.r===cellDrag.ar && info.c===cellDrag.ac) return;
+    setCellSel(cellDrag.id, cellDrag.ar, cellDrag.ac, info.r, info.c);
+    const sel=window.getSelection(); if(sel) sel.removeAllRanges();
+  });
+  document.addEventListener('mouseup', ()=>{ cellDrag=null; });
+
+  /* セルの中のキー操作: Enter で下のセル、Tab で次のセルへ（Shift+Enter は改行） */
+  function focusCell(id, r, c){
+    const b=findBlock(id); if(!b || b.type!=='table') return false;
+    const a=CORE.anchorAt(b.content, r, c); if(!a) return false;
+    const td=$('.qm-block[data-id="'+id+'"] td[data-r="'+a.r+'"][data-c="'+a.c+'"]');
+    if(!td) return false;
+    focusEditable(td);
+    const sel=window.getSelection();
+    if(sel){ const rg=document.createRange(); rg.selectNodeContents(td); rg.collapse(false); sel.removeAllRanges(); sel.addRange(rg); }
+    setCellSel(id, a.r, a.c, a.r, a.c);
+    return true;
+  }
+  $('#sheetInner').addEventListener('keydown',(e)=>{
+    if(e.key!=='Tab' && !(e.key==='Enter' && !e.shiftKey)) return;
+    const node=e.target.closest ? e.target.closest('[data-ce^="tcell:"]') : null;
+    if(!node) return;
+    const info=parseCellRole(node); if(!info) return;
+    const b=findBlock(info.id); if(!b || b.type!=='table') return;
+    e.preventDefault();
+    normalizeTable(b.content);
+    const R=b.content.rows.length, C=b.content.columns.length;
+    if(info.r>=R || info.c>=C) return;
+    const cell=b.content.rows[info.r].cells[info.c];
+    if(e.key==='Enter'){
+      const nr=info.r + Math.max(1, cell.rs||1);
+      if(nr>=R && !tableOp(info.id, c=> CORE.insertRow(c, R))) return;
+      focusCell(info.id, Math.min(nr, R), info.c);
+      return;
+    }
+    let r=info.r, x=info.c;
+    if(e.shiftKey){ x-=1; if(x<0){ r-=1; x=C-1; } }
+    else { x+=Math.max(1, cell.cs||1); if(x>=C){ r+=1; x=0; } }
+    if(r<0 || r>=R) return;
+    focusCell(info.id, r, x);
+  });
+
   /* ------------------------------------------------------------------
      Drag reorder (handle-based, array-level)
+     並べ替え先は「シート直下」と「段組みの列の中」の2種類。
+     列をまたいでブロックを移動できる。
      ------------------------------------------------------------------ */
   let dragId=null, dropIndicator=null, dropped=false;
   $('#sheetInner').addEventListener('dragstart',(e)=>{
@@ -1411,35 +2439,56 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     e.dataTransfer.effectAllowed='move'; try{e.dataTransfer.setData('text/plain','');}catch(_){}
     dropIndicator=el('div','qm-drop-indicator');
   });
+  /* 並べ替え先のコンテナ要素から、対応するブロック配列を取り出す */
+  function containerListOf(node){
+    if(!node) return null;
+    if(node.id==='sheetInner') return state.doc.blocks;
+    const loc=locate(node.getAttribute('data-block-id')); if(!loc) return null;
+    const col=((loc.block.content||{}).cols||[])[+node.getAttribute('data-col-index')];
+    if(!col) return null;
+    if(!Array.isArray(col.blocks)) col.blocks=[];
+    return col.blocks;
+  }
   $('#sheetInner').addEventListener('dragover',(e)=>{
-    if(!dragId) return; e.preventDefault();
-    const inner=$('#sheetInner'); const blocks=[...inner.querySelectorAll('.qm-block:not(.dragging)')];
+    if(!dragId || !dropIndicator) return;
+    const host=e.target.closest ? e.target.closest('[data-blocks]') : null;
+    // 自分自身の中（自分の列）へは入れられない
+    if(!host || host.closest('.qm-block[data-id="'+dragId+'"]')){
+      if(dropIndicator.parentNode) dropIndicator.remove();
+      return;
+    }
+    e.preventDefault();
+    const blocks=[...host.children].filter(n=> n.classList && n.classList.contains('qm-block') && !n.classList.contains('dragging'));
     let before=null;
     for(const bl of blocks){ const r=bl.getBoundingClientRect(); if(e.clientY < r.top + r.height/2){ before=bl; break; } }
     if(dropIndicator.parentNode) dropIndicator.remove();
-    if(before) inner.insertBefore(dropIndicator, before); else inner.appendChild(dropIndicator);
+    if(before) host.insertBefore(dropIndicator, before); else host.appendChild(dropIndicator);
   });
   // シート内で実際にドロップされたときだけ確定させる（Escでの中断や、
   // パネル等シート外での離しでは並べ替えない）。
   $('#sheetInner').addEventListener('drop',(e)=>{ e.preventDefault(); dropped=true; });
   $('#sheetInner').addEventListener('dragend',()=>{
     if(!dragId) return;
-    const inner=$('#sheetInner');
     const wrap=$('.qm-block[data-id="'+dragId+'"]'); if(wrap) wrap.classList.remove('dragging');
-    const valid = dropped && dropIndicator && dropIndicator.parentNode===inner;
-    let targetIndex = -1;
-    if(valid){
-      const kids=[...inner.children].filter(n=> n.classList.contains('qm-block')||n===dropIndicator);
-      targetIndex = kids.indexOf(dropIndicator);
+    const host=(dropped && dropIndicator && dropIndicator.parentNode
+                && dropIndicator.parentNode.hasAttribute
+                && dropIndicator.parentNode.hasAttribute('data-blocks')) ? dropIndicator.parentNode : null;
+    let targetList=null, targetIndex=-1;
+    if(host){
+      targetList=containerListOf(host);
+      const kids=[...host.children].filter(n=> (n.classList && n.classList.contains('qm-block'))||n===dropIndicator);
+      targetIndex=kids.indexOf(dropIndicator);
     }
     if(dropIndicator && dropIndicator.parentNode) dropIndicator.remove();
-    const from=findIndex(dragId);
-    if(valid && from>=0 && targetIndex>=0){
-      let insertAt = targetIndex;
-      const moved = state.doc.blocks.splice(from,1)[0];
-      if(insertAt>from) insertAt = Math.max(0, insertAt-1);
-      insertAt = Math.min(Math.max(insertAt,0), state.doc.blocks.length);
-      state.doc.blocks.splice(insertAt,0,moved);
+    const from=locate(dragId);
+    // 自分の子孫の中へは移せない（入れ子が壊れて内容が消えるのを防ぐ）
+    if(targetList && from && targetIndex>=0 && !CORE.subtreeHas(from.block, host.getAttribute('data-block-id')||'')){
+      const sameList=(targetList===from.list);
+      let insertAt=targetIndex;
+      from.list.splice(from.index,1);
+      if(sameList && insertAt>from.index) insertAt=Math.max(0, insertAt-1);
+      insertAt=Math.min(Math.max(insertAt,0), targetList.length);
+      targetList.splice(insertAt,0,from.block);
       const kept=dragId; commit(); selectBlock(kept);
     }
     dragId=null; dropIndicator=null; dropped=false;
@@ -1715,7 +2764,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       const res=await fetch(API+'/'+id); if(!res.ok) throw 0; const data=await res.json();
       docLifetime++;
       state.id=data.id; state.title=data.title||''; state.doc=normalizeDoc(data.document);
-      $('#docTitle').value=state.title; selectedId=null;
+      $('#docTitle').value=state.title; selectedId=null; cellSel=null; closeBlockMenu();
       resetHistory();
       render(); buildPageSettings(); buildInspector();
       dirty=false; setSaveState('保存済', 'saved');
@@ -1791,7 +2840,11 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     }catch(e){ body.innerHTML='<div class="qm-list-empty">読み込みに失敗しました。</div>'; }
   }
   async function applyBaseTemplate(id){
-    try{ const res=await fetch(TPL_API+'/'+id); if(!res.ok) throw 0; const data=await res.json(); applyDocument(data.document); }
+    try{
+      const res=await fetch(TPL_API+'/'+id); if(!res.ok) throw 0;
+      const data=await res.json();
+      applyDocument(sanitizeImportedDoc(data.document||{}));
+    }
     catch(e){ toast('テンプレートの読み込みに失敗しました'); }
   }
   async function exportBaseTemplate(id, name){
@@ -1852,7 +2905,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     docLifetime++;
     state.id=null; state.title=opts.title||''; state.doc=normalizeDoc(JSON.parse(JSON.stringify(doc||{})));
     $('#docTitle').value=state.title;
-    selectedId=null; resetHistory();
+    selectedId=null; cellSel=null; closeBlockMenu(); resetHistory();
     render(); buildPageSettings(); buildInspector();
     dirty=false; setSaveState('新規（未保存）'); fitZoom();
     closeTemplates();
@@ -1903,21 +2956,34 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     return tpl.innerHTML;
   }
   function sanitizeImportedDoc(doc){
-    (doc.blocks||[]).forEach(b=>{
-      const c=b.content=b.content||{};
-      if(typeof c.html==='string') c.html=sanitizeHtml(c.html);
-      if(typeof c.title==='string') c.title=sanitizeHtml(c.title);
-      if(typeof c.bannerLabel==='string') c.bannerLabel=sanitizeHtml(c.bannerLabel);
-      if(c.heads && typeof c.heads==='object'){
-        for(const k in c.heads){ if(typeof c.heads[k]==='string') c.heads[k]=sanitizeHtml(c.heads[k]); }
-      }
-      (Array.isArray(c.cols)?c.cols:[]).forEach(col=>{ if(col && typeof col.html==='string') col.html=sanitizeHtml(col.html); });
-      (Array.isArray(c.rows)?c.rows:[]).forEach(r=>{
-        if(!r) return;
-        ['label','value','name','note','qty','unit','price'].forEach(k=>{ if(typeof r[k]==='string') r[k]=sanitizeHtml(r[k]); });
+    if(!doc || typeof doc!=='object') return doc;
+    // 段組みの列に入れ子になったブロックも同じように無害化する
+    (function walk(blocks, depth){
+      if(!Array.isArray(blocks) || depth>10) return;
+      blocks.forEach(b=>{
+        if(!b || typeof b!=='object') return;
+        const c=(b.content && typeof b.content==='object') ? b.content : (b.content={});
+        if(typeof c.html==='string') c.html=sanitizeHtml(c.html);
+        if(typeof c.title==='string') c.title=sanitizeHtml(c.title);
+        if(typeof c.bannerLabel==='string') c.bannerLabel=sanitizeHtml(c.bannerLabel);
+        if(c.heads && typeof c.heads==='object'){
+          for(const k in c.heads){ if(typeof c.heads[k]==='string') c.heads[k]=sanitizeHtml(c.heads[k]); }
+        }
+        (Array.isArray(c.cols)?c.cols:[]).forEach(col=>{
+          if(!col || typeof col!=='object') return;
+          if(typeof col.html==='string') col.html=sanitizeHtml(col.html);
+          if(Array.isArray(col.blocks)) walk(col.blocks, depth+1);
+        });
+        (Array.isArray(c.rows)?c.rows:[]).forEach(r=>{
+          if(!r || typeof r!=='object') return;
+          ['label','value','name','note','qty','unit','price'].forEach(k=>{ if(typeof r[k]==='string') r[k]=sanitizeHtml(r[k]); });
+          (Array.isArray(r.cells)?r.cells:[]).forEach(cell=>{
+            if(cell && typeof cell.html==='string') cell.html=sanitizeHtml(cell.html);
+          });
+        });
+        if(b.type==='image' && typeof c.src==='string' && c.src && !/^(data:image\/|https?:\/\/|\/)/i.test(c.src)) c.src='';
       });
-      if(b.type==='image' && typeof c.src==='string' && c.src && !/^(data:image\/|https?:\/\/|\/)/i.test(c.src)) c.src='';
-    });
+    })(doc.blocks, 0);
     return doc;
   }
 
@@ -1964,31 +3030,40 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
      ------------------------------------------------------------------ */
   const ISSUER_KEY='dstt_qm_issuer_v1';
   function loadIssuer(){
-    try{ const o=JSON.parse(localStorage.getItem(ISSUER_KEY)||'{}');
-      return { profiles:Array.isArray(o.profiles)?o.profiles:[], defaultId:o.defaultId||null }; }
-    catch(_){ return { profiles:[], defaultId:null }; }
+    try{
+      const o=JSON.parse(localStorage.getItem(ISSUER_KEY)||'{}');
+      // 以前の固定項目（会社名・住所…）で保存されたものは、読み込むときに
+      // 自由項目へ移行する（差し込んだときの見た目は変わらない）。
+      const profiles=(Array.isArray(o.profiles)?o.profiles:[])
+        .filter(x=> x && typeof x==='object')
+        .map(CORE.normalizeIssuer);
+      return { profiles:profiles, defaultId:o.defaultId||null };
+    }catch(_){ return { profiles:[], defaultId:null }; }
   }
-  function saveIssuer(data){ try{ localStorage.setItem(ISSUER_KEY, JSON.stringify(data)); }catch(_){ toast('保存に失敗しました'); } }
+  function saveIssuer(data){
+    try{
+      const clean={
+        profiles:(data.profiles||[]).map(CORE.normalizeIssuer).slice(0,50),
+        defaultId:data.defaultId||null
+      };
+      if(clean.defaultId && !clean.profiles.some(p=>p.id===clean.defaultId)){
+        clean.defaultId=(clean.profiles[0] && clean.profiles[0].id)||null;
+      }
+      localStorage.setItem(ISSUER_KEY, JSON.stringify(clean));
+    }catch(_){ toast('保存に失敗しました（保存できる容量を超えている可能性があります）'); }
+  }
   function issuerDefault(data){ data=data||loadIssuer(); return data.profiles.find(p=>p.id===data.defaultId) || data.profiles[0] || null; }
 
-  function issuerHtml(p){
-    const lines=[];
-    const head=[p.company, p.office].filter(Boolean).join('　');
-    if(head) lines.push('<span style="font-size:15px;font-weight:700;">'+esc(head)+'</span>');
-    const addr=(p.zip?('〒'+esc(p.zip)+'　'):'')+esc(p.address||'');
-    if(addr.trim()) lines.push(addr);
-    if(p.tel) lines.push('TEL '+esc(p.tel));
-    if(p.fax) lines.push('FAX '+esc(p.fax));
-    if(p.rep) lines.push('営業担当　'+esc(p.rep)+(p.seal?' ㊞':''));
-    return lines.join('<br>');
-  }
   function insertIssuerBlock(p){
     if(!p){ toast('差出人が登録されていません'); return; }
     const b={ id:uid(), type:'text', style:baseStyle({align:'right', fontSize:13, marginBottom:14}), content:{ html:issuerHtml(p) } };
-    const idx = selectedId ? findIndex(selectedId)+1 : state.doc.blocks.length;
-    state.doc.blocks.splice(idx,0,b);
+    // 選択中のブロックと同じ場所（段組みの列の中なら、その列）へ差し込む
+    const loc = selectedId ? locate(selectedId) : null;
+    const list = loc ? loc.list : state.doc.blocks;
+    const idx  = loc ? loc.index+1 : state.doc.blocks.length;
+    list.splice(idx,0,b);
     commit(); selectBlock(b.id);
-    const node=$('.qm-block[data-id="'+b.id+'"]'); if(node) node.scrollIntoView({behavior:'smooth',block:'center'});
+    scrollToBlock(b.id);
     toast('差出人を挿入しました');
   }
   function addIssuerBlockFromDefault(){
@@ -2007,19 +3082,33 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     data.profiles.forEach(p=>{
       const item=el('div','qm-issuer-item');
       const top=el('div','top');
-      const nm=el('span','nm'); nm.textContent=p.name || (p.company||'差出人');
+      const nm=el('span','nm'); nm.textContent=p.name||'差出人';
       top.appendChild(nm);
       if(p.id===data.defaultId){ const bd=el('span','qm-badge-default'); bd.textContent='既定'; top.appendChild(bd); }
       item.appendChild(top);
-      const bd=el('div','body'); bd.textContent=issuerHtml(p).replace(/<[^>]+>/g,'').replace(/　/g,' ')||'（内容なし）'; item.appendChild(bd);
+      const bd=el('div','body'); bd.textContent=CORE.issuerPreviewText(p)||'（内容なし）'; item.appendChild(bd);
       const acts=el('div','acts');
-      const ins=el('button','qm-mini'); ins.textContent='この差出人を挿入'; ins.addEventListener('click',()=>{ insertIssuerBlock(p); closeIssuer(); });
+      const ins=el('button','qm-mini'); ins.textContent='この差出人を挿入';
+      ins.addEventListener('click',()=>{ insertIssuerBlock(p); closeIssuer(); });
       const ed=el('button','qm-mini'); ed.textContent='編集'; ed.addEventListener('click',()=> showIssuerForm(p));
-      acts.appendChild(ins); acts.appendChild(ed);
-      if(p.id!==data.defaultId){ const df=el('button','qm-mini'); df.textContent='既定にする'; df.addEventListener('click',()=>{ const d=loadIssuer(); d.defaultId=p.id; saveIssuer(d); renderIssuerList(); }); acts.appendChild(df); }
-      const del=el('button','qm-mini danger'); del.textContent='削除'; del.addEventListener('click',()=>{
-        if(!confirm('差出人「'+(p.name||p.company||'')+'」を削除しますか？')) return;
-        const d=loadIssuer(); d.profiles=d.profiles.filter(x=>x.id!==p.id); if(d.defaultId===p.id) d.defaultId=(d.profiles[0]&&d.profiles[0].id)||null; saveIssuer(d); renderIssuerList();
+      const cp=el('button','qm-mini'); cp.textContent='複製'; cp.title='この差出人をもとに新しく作る';
+      cp.addEventListener('click',()=>{
+        const copy=CORE.normalizeIssuer(JSON.parse(JSON.stringify(p)));
+        copy.id=''; copy.name=(p.name||'差出人')+'（コピー）';
+        showIssuerForm(copy);
+      });
+      acts.appendChild(ins); acts.appendChild(ed); acts.appendChild(cp);
+      if(p.id!==data.defaultId){
+        const df=el('button','qm-mini'); df.textContent='既定にする';
+        df.addEventListener('click',()=>{ const d=loadIssuer(); d.defaultId=p.id; saveIssuer(d); renderIssuerList(); });
+        acts.appendChild(df);
+      }
+      const del=el('button','qm-mini danger'); del.textContent='削除';
+      del.addEventListener('click',()=>{
+        if(!confirm('差出人「'+(p.name||'')+'」を削除しますか？')) return;
+        const d=loadIssuer(); d.profiles=d.profiles.filter(x=>x.id!==p.id);
+        if(d.defaultId===p.id) d.defaultId=(d.profiles[0]&&d.profiles[0].id)||null;
+        saveIssuer(d); $('#issuerFormWrap').innerHTML=''; renderIssuerList();
       });
       acts.appendChild(del);
       item.appendChild(acts);
@@ -2027,45 +3116,113 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     });
   }
 
+  /* 差出人の編集フォーム。項目（名前と内容）はいくつでも足せて、
+     並べ替え・削除・見せ方（太字／文字の大きさ／同じ行に続ける／㊞）も選べる。 */
   function showIssuerForm(existing){
-    const p = existing || { id:'', name:'', company:'', office:'', zip:'', address:'', tel:'', fax:'', rep:'', seal:true };
+    const p = existing
+      ? CORE.normalizeIssuer(JSON.parse(JSON.stringify(existing)))
+      : { id:'', name:'', fields:CORE.defaultIssuerFields() };
+    if(existing && !existing.id) p.id='';   // 複製から作るときは新しいIDにする
     const wrap=$('#issuerFormWrap');
     const f=el('div','qm-issuer-form');
-    function field(label, key, full){
-      const c=el('div', full?'full':'');
-      const l=el('label'); l.textContent=label; l.style.cssText='display:block;font-size:.7rem;font-weight:700;color:#475569;margin-bottom:3px';
-      const i=el('input','qm-inp'); i.value=p[key]||''; i.dataset.k=key;
-      c.appendChild(l); c.appendChild(i); return c;
+
+    const nameBox=el('div');
+    const nameLb=el('label'); nameLb.textContent='表示名（例：千葉営業所）';
+    nameLb.style.cssText='display:block;font-size:.7rem;font-weight:700;color:#475569;margin-bottom:3px';
+    const nameInp=el('input','qm-inp'); nameInp.value=p.name||''; nameInp.maxLength=80;
+    nameInp.placeholder='一覧で見分けるための名前';
+    nameBox.appendChild(nameLb); nameBox.appendChild(nameInp);
+    f.appendChild(nameBox);
+
+    const listLb=el('div'); listLb.textContent='項目（項目名も内容も自由に変えられます）';
+    listLb.style.cssText='font-size:.7rem;font-weight:700;color:#475569;margin:11px 0 4px';
+    f.appendChild(listLb);
+    const list=el('div','qm-if-list'); f.appendChild(list);
+
+    const prevLb=el('div'); prevLb.textContent='見積書に入る形';
+    prevLb.style.cssText='font-size:.7rem;font-weight:700;color:#475569;margin:11px 0 4px';
+    const prev=el('div','qm-if-preview');
+    function updatePreview(){
+      // issuerHtml は値をエスケープするので、そのまま表示してよい
+      prev.innerHTML = issuerHtml(p) || '<span style="color:#94a3b8">（内容がありません）</span>';
     }
-    const g=el('div','qm-if-grid');
-    g.appendChild(field('表示名（例：千葉営業所）','name', true));
-    g.appendChild(field('会社名','company'));
-    g.appendChild(field('営業所名','office'));
-    g.appendChild(field('郵便番号','zip'));
-    g.appendChild(field('住所','address'));
-    g.appendChild(field('TEL','tel'));
-    g.appendChild(field('FAX','fax'));
-    g.appendChild(field('営業担当','rep', true));
-    f.appendChild(g);
-    const sealWrap=el('label'); sealWrap.style.cssText='display:flex;align-items:center;gap:7px;margin:8px 0;font-size:.76rem;font-weight:700;color:#475569;cursor:pointer';
-    const sealCb=el('input'); sealCb.type='checkbox'; sealCb.checked=p.seal!==false; sealCb.id='issuerSeal';
-    const sealTx=el('span'); sealTx.textContent='営業担当名の後に ㊞ を付ける';
-    sealWrap.appendChild(sealCb); sealWrap.appendChild(sealTx); f.appendChild(sealWrap);
-    const btns=el('div'); btns.style.cssText='display:flex;gap:6px;margin-top:4px';
+
+    function optCheck(label, checked, on){
+      const w=el('label','opt');
+      const cb=el('input'); cb.type='checkbox'; cb.checked=!!checked;
+      cb.addEventListener('change',()=>{ on(cb.checked); updatePreview(); });
+      const t=el('span'); t.textContent=label;
+      w.appendChild(cb); w.appendChild(t); return w;
+    }
+
+    function renderFields(){
+      list.innerHTML='';
+      p.fields.forEach((fld,i)=>{
+        const row=el('div','qm-if-row');
+        const line=el('div','line');
+        const lab=el('input','qm-inp lab'); lab.value=fld.label||''; lab.placeholder='項目名'; lab.maxLength=60;
+        lab.addEventListener('input',()=>{ fld.label=lab.value; updatePreview(); });
+        const val=el('input','qm-inp val'); val.value=fld.value||''; val.placeholder='内容'; val.maxLength=300;
+        val.addEventListener('input',()=>{ fld.value=val.value; updatePreview(); });
+        line.appendChild(lab); line.appendChild(val);
+        const opts=el('div','opts'); opts.style.display='none';
+        const gear=el('button','qm-mini'); gear.textContent='⚙'; gear.title='この項目の見せ方';
+        gear.addEventListener('click',()=>{ opts.style.display=(opts.style.display==='none' ? 'flex' : 'none'); });
+        const up=el('button','qm-mini'); up.textContent='↑'; up.title='上へ'; up.disabled=(i===0);
+        up.addEventListener('click',()=>{ const t=p.fields[i-1]; p.fields[i-1]=p.fields[i]; p.fields[i]=t; renderFields(); updatePreview(); });
+        const dn=el('button','qm-mini'); dn.textContent='↓'; dn.title='下へ'; dn.disabled=(i===p.fields.length-1);
+        dn.addEventListener('click',()=>{ const t=p.fields[i+1]; p.fields[i+1]=p.fields[i]; p.fields[i]=t; renderFields(); updatePreview(); });
+        const rm=el('button','qm-mini danger'); rm.textContent='×'; rm.title='この項目を削除';
+        rm.addEventListener('click',()=>{ p.fields.splice(i,1); renderFields(); updatePreview(); });
+        line.appendChild(gear); line.appendChild(up); line.appendChild(dn); line.appendChild(rm);
+        row.appendChild(line);
+
+        opts.appendChild(optCheck('項目名も出す', fld.showLabel, v=>{ fld.showLabel=v; }));
+        opts.appendChild(optCheck('前の行に続ける', fld.sameLine, v=>{ fld.sameLine=v; }));
+        opts.appendChild(optCheck('太字', fld.bold, v=>{ fld.bold=v; }));
+        opts.appendChild(optCheck('㊞ を付ける', fld.seal, v=>{ fld.seal=v; }));
+        const sizeW=el('label','opt');
+        const sizeT=el('span'); sizeT.textContent='文字';
+        const sizeSel=el('select','qm-sel'); sizeSel.style.cssText='height:26px;width:auto;font-size:.72rem';
+        [['sm','小'],['md','標準'],['lg','大']].forEach(o=>{
+          const op=el('option'); op.value=o[0]; op.textContent=o[1]; if(fld.size===o[0]) op.selected=true; sizeSel.appendChild(op);
+        });
+        sizeSel.addEventListener('change',()=>{ fld.size=sizeSel.value; updatePreview(); });
+        sizeW.appendChild(sizeT); sizeW.appendChild(sizeSel);
+        opts.appendChild(sizeW);
+        row.appendChild(opts);
+        list.appendChild(row);
+      });
+    }
+
+    const addField=el('button','qm-mini'); addField.textContent='＋ 項目を追加';
+    addField.style.cssText='width:100%;margin-top:6px';
+    addField.addEventListener('click',()=>{
+      if(p.fields.length>=40){ toast('項目は40個までです'); return; }
+      p.fields.push(CORE.issuerField({label:'', value:''}));
+      renderFields(); updatePreview();
+      const labs=list.querySelectorAll('.qm-if-row .lab');
+      if(labs.length) labs[labs.length-1].focus();
+    });
+    f.appendChild(addField);
+    f.appendChild(prevLb); f.appendChild(prev);
+
+    const btns=el('div'); btns.style.cssText='display:flex;gap:6px;margin-top:10px';
     const save=el('button','qm-tb-btn accent'); save.textContent='保存'; save.style.flex='1';
     save.addEventListener('click',()=>{
       const data=loadIssuer();
-      const rec={ id:p.id||('i'+Date.now()+Math.random().toString(36).slice(2,6)), seal:sealCb.checked };
-      f.querySelectorAll('input[data-k]').forEach(i=> rec[i.dataset.k]=i.value.trim());
-      if(!rec.name) rec.name = rec.company || rec.office || '差出人';
+      const rec=CORE.normalizeIssuer({ id:p.id||undefined, name:nameInp.value, fields:p.fields });
       const idx=data.profiles.findIndex(x=>x.id===rec.id);
       if(idx>=0) data.profiles[idx]=rec; else data.profiles.push(rec);
       if(!data.defaultId) data.defaultId=rec.id;
       saveIssuer(data); wrap.innerHTML=''; renderIssuerList(); toast('差出人を保存しました');
     });
-    const cancel=el('button','qm-tb-btn'); cancel.textContent='キャンセル'; cancel.style.cssText='background:#f1f5f9;color:#334155;border-color:#e2e8f0';
+    const cancel=el('button','qm-tb-btn'); cancel.textContent='キャンセル';
+    cancel.style.cssText='background:#f1f5f9;color:#334155;border-color:#e2e8f0';
     cancel.addEventListener('click',()=> wrap.innerHTML='');
     btns.appendChild(save); btns.appendChild(cancel); f.appendChild(btns);
+
+    renderFields(); updatePreview();
     wrap.innerHTML=''; wrap.appendChild(f);
     f.scrollIntoView({behavior:'smooth', block:'nearest'});
   }
@@ -2076,14 +3233,41 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   function normalizeDoc(doc){
     if(!doc || typeof doc!=='object' || !Array.isArray(doc.blocks)) return defaultDoc();
     doc.page = Object.assign(defaultDoc().page, doc.page||{});
-    doc.blocks.forEach(b=>{ if(!b.id) b.id=uid(); b.style=Object.assign(baseStyle(), b.style||{}); b.content=b.content||{}; });
+    normalizeBlocks(doc.blocks, 0, new Set());
     return doc;
+  }
+  /* ブロック配列を読み込める形に整える。
+     - 壊れた要素を落とし、IDの重複を解消する（選択や編集の取り違えを防ぐ）
+     - 旧形式の項目表を行列形式へ移行する
+     - 段組みの入れ子は深さを制限して、描画や保存が暴走しないようにする */
+  function normalizeBlocks(blocks, depth, seen){
+    if(!Array.isArray(blocks)) return;
+    for(let i=blocks.length-1; i>=0; i--){
+      const b=blocks[i];
+      if(!b || typeof b!=='object' || Array.isArray(b)){ blocks.splice(i,1); continue; }
+      if(!b.id || seen.has(b.id)) b.id=uid();
+      seen.add(b.id);
+      b.style=Object.assign(baseStyle(), (b.style && typeof b.style==='object') ? b.style : {});
+      if(!b.content || typeof b.content!=='object' || Array.isArray(b.content)) b.content={};
+      if(b.type==='table') normalizeTable(b.content);
+      if(b.type==='columns'){
+        const c=b.content;
+        c.cols=(Array.isArray(c.cols)?c.cols:[]).filter(col=> col && typeof col==='object' && !Array.isArray(col));
+        if(!c.cols.length) c.cols=[{width:50,align:'left',fontSize:13,html:''},{width:50,align:'right',fontSize:13,html:''}];
+        c.cols.forEach(col=>{
+          if(col.blocks!=null && !Array.isArray(col.blocks)) col.blocks=[];
+          if(!Array.isArray(col.blocks)) return;
+          if(depth>=CORE.MAX_NEST_DEPTH){ col.blocks=[]; return; }
+          normalizeBlocks(col.blocks, depth+1, seen);
+        });
+      }
+    }
   }
   function newDocument(){
     docLifetime++;
     state.id=null; state.doc=defaultDoc(); state.title='';
     $('#docTitle').value='';
-    selectedId=null; resetHistory();
+    selectedId=null; cellSel=null; closeBlockMenu(); resetHistory();
     render(); buildPageSettings(); buildInspector();
     dirty=false; setSaveState('新規（未保存）');
     fitZoom();
@@ -2143,7 +3327,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     const app=$('#qmApp');
     app.classList.toggle('previewing', !!onFlag);
     $('#btnPreview').classList.toggle('primary', !!onFlag);
-    if(onFlag){ finishPaste(); hideInlineBar(); selectBlock(null); }
+    if(onFlag){ finishPaste(); hideInlineBar(); closeBlockMenu(); clearCellSel(); selectBlock(null); }
     document.querySelectorAll('#sheetInner [data-ce]').forEach(n=>n.setAttribute('contenteditable', onFlag?'false':'true'));
   }
   $('#btnPreview').addEventListener('click', ()=> setPreview(!isPreviewing()));
@@ -2162,7 +3346,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     if((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==='y' || (e.shiftKey&&e.key.toLowerCase()==='z'))){ e.preventDefault(); doRedo(); return; }
     if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); dirty=true; saveNow(); return; }
     if(e.key==='Escape'){
-      // 貼り付けバー→モーダル→プレビュー→パネル→選択解除の順で閉じる
+      // メニュー→貼り付けバー→モーダル→プレビュー→パネル→選択解除の順で閉じる
+      if(blockMenuEl){ closeBlockMenu(); return; }
       if(pasteCtx){ finishPaste(); return; }
       const modal=document.querySelector('.qm-modal.show');
       if(modal){ modal.classList.remove('show'); return; }

@@ -271,6 +271,142 @@ def test_non_admin_can_view_but_not_manage_base_templates(app_ctx):
     assert len(admin_client.get("/tools/quote_maker/api/templates").get_json()["templates"]) == 1
 
 
+# --- 段組みの入れ子・行列形式の項目表 ------------------------------------------
+
+def _nested_document():
+    """2段組の左に明細表、右に差出人テキストを入れ、行列形式の項目表を持つ見積書。"""
+    return {
+        "page": {"paper": "A4"},
+        "blocks": [
+            {
+                "id": "c1",
+                "type": "columns",
+                "style": {},
+                "content": {
+                    "gap": 16,
+                    "cols": [
+                        {
+                            "width": 60,
+                            "align": "left",
+                            "blocks": [
+                                {
+                                    "id": "n1",
+                                    "type": "items",
+                                    "style": {},
+                                    "content": {"rows": [{"name": "貸切バス", "qty": "2", "price": "50000"}]},
+                                }
+                            ],
+                        },
+                        {
+                            "width": 40,
+                            "align": "right",
+                            "blocks": [
+                                {"id": "n2", "type": "text", "style": {}, "content": {"html": "大進道路<br>TEL 000"}}
+                            ],
+                        },
+                    ],
+                },
+            },
+            {
+                "id": "t1",
+                "type": "table",
+                "style": {},
+                "content": {
+                    "columns": [{"width": 30}, {"width": 40}, {"width": 30}],
+                    "rows": [
+                        {"cells": [
+                            {"html": "見出し", "cs": 3, "rs": 1, "shade": True},
+                            {"html": "", "cs": 1, "rs": 1, "covered": True},
+                            {"html": "", "cs": 1, "rs": 1, "covered": True},
+                        ]},
+                        {"cells": [
+                            {"html": "契約期間", "cs": 1, "rs": 2},
+                            {"html": "7月", "cs": 1, "rs": 1},
+                            {"html": "備考", "cs": 1, "rs": 1},
+                        ]},
+                        {"cells": [
+                            {"html": "", "cs": 1, "rs": 1, "covered": True},
+                            {"html": "8月", "cs": 1, "rs": 1},
+                            {"html": "", "cs": 1, "rs": 1},
+                        ]},
+                    ],
+                },
+            },
+        ],
+    }
+
+
+def test_nested_column_blocks_and_merged_table_round_trip(app_ctx):
+    """段組みの列に入れたブロックと、結合したセルがそのまま保存・復元される。"""
+    username = _create_user(app_ctx)
+    client = app_ctx.test_client()
+    _login(client, username)
+
+    created = client.post(
+        "/tools/quote_maker/api/quotes",
+        json={"title": "段組み見積", "document": _nested_document()},
+    )
+    assert created.status_code == 201
+    qid = created.get_json()["id"]
+
+    doc = client.get(f"/tools/quote_maker/api/quotes/{qid}").get_json()["document"]
+    cols = doc["blocks"][0]["content"]["cols"]
+    assert cols[0]["blocks"][0]["type"] == "items"
+    assert cols[1]["blocks"][0]["content"]["html"] == "大進道路<br>TEL 000"
+
+    table = doc["blocks"][1]["content"]
+    assert len(table["columns"]) == 3
+    assert table["rows"][0]["cells"][0]["cs"] == 3          # 横方向の結合
+    assert table["rows"][1]["cells"][0]["rs"] == 2          # 縦方向の結合
+    assert table["rows"][0]["cells"][1]["covered"] is True  # 結合で隠れたセル
+
+    # 複製しても入れ子の中身ごとコピーされる
+    clone = client.post(f"/tools/quote_maker/api/quotes/{qid}/duplicate").get_json()
+    clone_cols = clone["document"]["blocks"][0]["content"]["cols"]
+    assert clone_cols[0]["blocks"][0]["type"] == "items"
+
+
+def test_nested_document_survives_update(app_ctx):
+    """列の中のブロックを増やす更新も保存できる。"""
+    username = _create_user(app_ctx)
+    client = app_ctx.test_client()
+    _login(client, username)
+
+    qid = client.post(
+        "/tools/quote_maker/api/quotes",
+        json={"title": "段組み見積", "document": _nested_document()},
+    ).get_json()["id"]
+
+    doc = _nested_document()
+    doc["blocks"][0]["content"]["cols"][1]["blocks"].append(
+        {"id": "n3", "type": "table", "style": {}, "content": {
+            "columns": [{"width": 100}], "rows": [{"cells": [{"html": "追加", "cs": 1, "rs": 1}]}]}}
+    )
+    resp = client.put(f"/tools/quote_maker/api/quotes/{qid}", json={"document": doc})
+    assert resp.status_code == 200
+    saved = resp.get_json()["document"]["blocks"][0]["content"]["cols"][1]["blocks"]
+    assert [b["type"] for b in saved] == ["text", "table"]
+
+
+def test_index_page_exposes_new_editor_features(app_ctx):
+    """画面に列追加・セル結合・自由項目の入口が含まれている。"""
+    username = _create_user(app_ctx)
+    client = app_ctx.test_client()
+    _login(client, username)
+    html = client.get("/tools/quote_maker/").get_data(as_text=True)
+
+    # 純粋ロジック（Node で単体テストしている部分）が読み込まれている
+    assert "QM_CORE_BEGIN" in html and "window.QM_CORE" in html
+    # 段組みの列へブロックを入れる導線
+    assert 'data-act' in html and "col-add" in html
+    assert "qm-colblocks" in html
+    # 項目表の行・列・結合の操作
+    for act in ("tbl-addrow", "tbl-addcol", "tbl-merge", "tbl-split", "tbl-delrow", "tbl-delcol"):
+        assert act in html, act
+    # 差出人の自由項目
+    assert "defaultIssuerFields" in html and "qm-if-row" in html
+
+
 def test_base_template_rejects_invalid_document(app_ctx):
     admin = _create_user(app_ctx, "boss", "Boss", is_admin=True)
     client = app_ctx.test_client()
