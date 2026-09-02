@@ -615,6 +615,14 @@ def _ensure_access_control_schema(app):
 
         tables = set(inspector.get_table_names())
 
+        # ツール間API専用許可（scope='api'）。既存行は通常許可なので 'full' を既定にする。
+        if "user_tool_permissions" in tables:
+            utp_cols = {c["name"] for c in inspector.get_columns("user_tool_permissions")}
+            if "scope" not in utp_cols:
+                alters.append(
+                    "ALTER TABLE user_tool_permissions ADD COLUMN scope VARCHAR(10) NOT NULL DEFAULT 'full'"
+                )
+
         if "tool_categories" not in tables:
             alters.append(
                 "CREATE TABLE tool_categories ("
@@ -1055,7 +1063,12 @@ def create_app(test_config=None):
 
     # アクセス権管理（機密ツールに before_request を紐付け）
     from flask import request as _req, abort
-    from .access_control import enforce_tool_access
+    from .access_control import (
+        enforce_tool_access,
+        mark_tool_api_request,
+        tool_api_allowed_fields,
+        tool_api_endpoint_allowed,
+    )
 
     # 軽量 CSRF 対策: アプリ全体の書き込み系リクエスト（不安全メソッド）に対して
     # Origin/Referer の同一オリジンを確認する（両方未設定なら通過）。以前は一部
@@ -1121,6 +1134,33 @@ def create_app(test_config=None):
         "/tools/shiftersync/cloudshift/api/pwa/",
     )
 
+    # ツール間API（app/tool_api.py）のレジストリ整合性チェック。
+    # 登録名が実在しない／参照専用でない場合は許可判定に使わず（＝従来どおり
+    # 提供元ツールの通常許可が必要）、起動ログに残す。
+    from .tool_api import VALID_TOOL_API_ENDPOINTS, ToolApiEndpoint, registry_problems
+
+    # registry_problems() で弾かれた登録は VALID_TOOL_API_ENDPOINTS に入らない
+    # （＝許可判定に使われない）。ここでは実在性と参照専用かどうかを追加で確かめる。
+    _tool_api_problems = list(registry_problems())
+    _tool_api_endpoints: dict[str, ToolApiEndpoint] = {}
+    for _name, _spec in VALID_TOOL_API_ENDPOINTS.items():
+        rule_methods: set[str] = set()
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint == _name:
+                rule_methods |= set(rule.methods or ())
+        if not rule_methods:
+            _tool_api_problems.append(f"{_name}: 実在しないエンドポイント")
+            continue
+        unsafe = {m for m in rule_methods if m not in {"GET", "HEAD", "OPTIONS"}}
+        if unsafe:
+            _tool_api_problems.append(
+                f"{_name}: 参照専用ではない（{sorted(unsafe)}）ためツール間APIとして扱わない"
+            )
+            continue
+        _tool_api_endpoints[_name] = _spec
+    for _problem in _tool_api_problems:
+        app.logger.error("ツール間APIレジストリの不整合: %s", _problem)
+
     @app.before_request
     def _enforce_sensitive_tool_access():
         endpoint = _req.endpoint or ""
@@ -1133,6 +1173,14 @@ def create_app(test_config=None):
         path = _req.path or ""
         for pref in _EXEMPT_PATH_PREFIXES:
             if path.startswith(pref):
+                return None
+        # ツール間APIとして登録された参照専用エンドポイントは、提供元ツールの
+        # 「ツール間API専用許可」でも通す。返す項目はここで決めて g に記録し、
+        # 提供元エンドポイント側で絞り込ませる。
+        spec = _tool_api_endpoints.get(endpoint)
+        if spec is not None and spec.provider == tool_key:
+            if _req.method in spec.methods and tool_api_endpoint_allowed(endpoint):
+                mark_tool_api_request(tool_api_allowed_fields(endpoint))
                 return None
         return enforce_tool_access(tool_key)
 

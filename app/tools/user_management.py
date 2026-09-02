@@ -30,10 +30,18 @@ from app.services import mail_inbox
 from app.security.password_policy import password_policy_error
 from app.access_control import (
     _user_satisfies_group_rule,
+    api_grantable_tool_keys,
     is_admin_user,
     is_legacy_admin_username,
     set_tool_access,
+    set_tool_access_scopes,
     tool_category,
+)
+from app.tool_api import (
+    TOOL_SCOPE_API,
+    TOOL_SCOPE_FULL,
+    api_consumers_for,
+    normalize_tool_scope,
 )
 from app.navigation import NAV_ITEMS
 from app.announcement_store import (
@@ -76,6 +84,19 @@ def _assignable_tool_keys() -> set[str]:
         if key and tool_category(key) == "sensitive":
             keys.add(key)
     return keys
+
+
+def _api_assignable_tool_keys() -> set[str]:
+    """ツール間API専用許可を付けられるツールキー（レジストリ ∩ 要許可ツール）。"""
+    return api_grantable_tool_keys() & _assignable_tool_keys()
+
+
+def _scoped_tool_keys(user: User, scope: str) -> list[str]:
+    return sorted(
+        perm.tool_key
+        for perm in user.tool_permissions
+        if normalize_tool_scope(perm.scope) == scope
+    )
 
 
 def _user_matching_group_rules(user: User, rules) -> dict:
@@ -134,7 +155,8 @@ def _serialize_user(user: User, group_rules=None, last_login_map=None) -> dict:
         "office_code": user.user_office.code if user.user_office else None,
         "department_name": user.department.name if user.department else None,
         "extra_office_ids": [row.office_id for row in extra_offices],
-        "tool_keys": [p.tool_key for p in user.tool_permissions],
+        "tool_keys": _scoped_tool_keys(user, TOOL_SCOPE_FULL),
+        "api_tool_keys": _scoped_tool_keys(user, TOOL_SCOPE_API),
         "group_tool_keys": list(group_sources.keys()),
         "group_tool_sources": group_sources,
         "last_login_at": last_login.isoformat() if last_login else None,
@@ -460,7 +482,9 @@ def get_user_tools(user_id):
     return jsonify({
         "user_id": user.id,
         "username": user.username,
-        "tool_keys": [p.tool_key for p in user.tool_permissions],
+        "tool_keys": _scoped_tool_keys(user, TOOL_SCOPE_FULL),
+        "api_tool_keys": _scoped_tool_keys(user, TOOL_SCOPE_API),
+        "api_assignable_tool_keys": sorted(_api_assignable_tool_keys()),
         "group_tool_keys": list(group_sources.keys()),
         "group_tool_sources": group_sources,
     })
@@ -469,7 +493,16 @@ def get_user_tools(user_id):
 @user_management_bp.route("/api/users/<int:user_id>/tools", methods=["PUT"])
 @login_required
 def update_user_tools(user_id):
-    """ユーザーに付与するツール（sensitiveカテゴリ）を一括更新"""
+    """ユーザーに付与するツール（sensitiveカテゴリ）を一括更新。
+
+    ``tool_keys``     … 通常許可（ツール本体を使える）
+    ``api_tool_keys`` … ツール間API専用許可（ツール本体は開けない）
+
+    同じツールを両方に指定した場合は通常許可を優先する（同一ツールに2種類の
+    許可は持てないため）。``api_tool_keys`` を省略した場合は、既存のツール間API
+    専用許可には触れない（キーを付けて空配列を送れば全解除）。古いクライアントが
+    ``tool_keys`` だけを送ってAPI専用許可を巻き添えで消さないようにするため。
+    """
     if not is_admin():
         return jsonify({"error": "管理者権限が必要です"}), 403
 
@@ -481,18 +514,39 @@ def update_user_tools(user_id):
     tool_keys = data.get("tool_keys")
     if not isinstance(tool_keys, list):
         return jsonify({"error": "tool_keysはリストで指定してください"}), 400
+    manages_api = "api_tool_keys" in data
+    api_tool_keys = data.get("api_tool_keys") or []
+    if not isinstance(api_tool_keys, list):
+        return jsonify({"error": "api_tool_keysはリストで指定してください"}), 400
 
     # sensitiveカテゴリのみ付与対象（publicは常時アクセス可能）
     sensitive_keys = _assignable_tool_keys()
     desired = {str(k).strip() for k in tool_keys if str(k).strip() in sensitive_keys}
+    # API専用許可は、ツール間APIを持つ提供元ツールにだけ付けられる
+    api_capable = _api_assignable_tool_keys()
+    api_desired = {
+        str(k).strip()
+        for k in api_tool_keys
+        if str(k).strip() in api_capable
+    } - desired
+
+    scopes = {key: TOOL_SCOPE_FULL for key in desired}
+    scopes.update({key: TOOL_SCOPE_API for key in api_desired})
+    managed = (TOOL_SCOPE_FULL, TOOL_SCOPE_API) if manages_api else (TOOL_SCOPE_FULL,)
 
     try:
-        set_tool_access(user.id, desired, granted_by=current_user.username)
+        set_tool_access_scopes(
+            user.id,
+            scopes,
+            granted_by=current_user.username,
+            managed_scopes=managed,
+        )
         db.session.refresh(user)
         return jsonify({
             "success": True,
             "user_id": user.id,
-            "tool_keys": [p.tool_key for p in user.tool_permissions],
+            "tool_keys": _scoped_tool_keys(user, TOOL_SCOPE_FULL),
+            "api_tool_keys": _scoped_tool_keys(user, TOOL_SCOPE_API),
         })
     except Exception as e:
         db.session.rollback()
@@ -772,6 +826,7 @@ def get_tools_catalog():
     if not is_admin():
         return jsonify({"error": "管理者権限が必要です"}), 403
 
+    api_capable = _api_assignable_tool_keys()
     items = []
     for nav in NAV_ITEMS:
         key = _nav_tool_key(nav)
@@ -782,6 +837,9 @@ def get_tools_catalog():
             "description": nav.get("description"),
             "href": nav.get("href"),
             "category": tool_category(key),
+            # ツール間API専用許可を付けられるか／どのツールから使われるか
+            "api_grantable": key in api_capable,
+            "api_consumers": sorted(api_consumers_for(key)) if key in api_capable else [],
         })
     return jsonify({"tools": items})
 
@@ -1987,7 +2045,9 @@ def bulk_update_users():
                 user.office_id = office_id
                 user.department_id = department_id
             if template:
-                current = {perm.tool_key for perm in user.tool_permissions}
+                # 権限テンプレートは通常許可だけを扱う。ツール間API専用許可は
+                # set_tool_access（managed_scopes='full'）が触らないので残る。
+                current = set(_scoped_tool_keys(user, TOOL_SCOPE_FULL))
                 desired = template_keys if template_mode == "replace" else (current | template_keys)
                 set_tool_access(user.id, desired, granted_by=current_user.username)
         db.session.commit()

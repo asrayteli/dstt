@@ -878,6 +878,10 @@ def _require_link_permission(integration_key: str) -> None:
     を判定する（app/services/to_bell_integrations.py）。トグルは利用者が自分で押せる
     ため、トグルだけを条件にすると pluslist / siteplus（sensitive＝個別付与が必要）の
     名簿を権限のない利用者が ToBell 経由で全件検索できてしまう。
+
+    「アクセス権あり」には、連携先ツールの通常許可のほかに、ツール間API専用許可
+    （scope='api'）も含む。ToBell の紐付けはツール間APIそのものであり、扱う項目も
+    社員番号・氏名・営業所名などの識別情報に限られるため。
     """
     if not integration_tool_access(current_user.username, integration_key):
         abort(403, description="この連携先ツールへのアクセス権がありません。管理者に付与を依頼してください。")

@@ -1,0 +1,140 @@
+# ツール間API専用許可（社員名簿PLUSを見せずに ShifterSync から使う）
+
+## 解決したい問題
+
+ShifterSync / CloudShift・有休共有ツール・ToBell は、社員名簿PLUS（`pluslist`）や
+現場リストPLUS（`siteplus`）のマスタを「候補サーチ」として参照します。
+
+これらの参照は提供元ツールの Blueprint（`/tools/pluslist/...`）を叩くため、従来は
+**社員名簿PLUSそのもののアクセス権** を配るしかありませんでした。しかしそれは
+
+- 名簿一覧・CSV/Excelエクスポート
+- 住所・連絡先・賃金情報
+- アップロード／編集履歴
+
+まで開いてしまうため、「ShifterSyncを使わせたいだけ」の利用者に過剰な権限を
+与えることになります。
+
+## 仕組み
+
+個別付与（`user_tool_permissions`）に **scope** を持たせました。
+
+| scope | 意味 |
+| --- | --- |
+| `full` | 従来どおりの通常許可。ツール本体のUIも全APIも使える |
+| `api` | **ツール間API専用許可**。ツール本体は開けず、登録済みのツール間APIからの参照だけを許す |
+
+`api` は単独では何も参照できません。次の **AND 条件** で初めて効きます。
+
+```
+提供元ツール（pluslist）の scope='api'
+  かつ 利用側ツール（shiftersync など）の通常許可
+  かつ 呼び先が app/tool_api.py に登録されたツール間APIであること
+```
+
+さらに、`api` で通したリクエストには **返却項目の絞り込み** がかかります。
+
+### 具体例：ShifterSync だけ使わせたい人
+
+管理者ページ →「権限」タブでそのユーザーを選び、
+
+- ShifterSync … 通常のチェック（通常許可）
+- 社員名簿PLUS … 「**ツール間APIのみ許可**」にチェック
+
+これで、
+
+| 操作 | 結果 |
+| --- | --- |
+| ダッシュボードに社員名簿PLUSが出るか | 出ない |
+| `/tools/pluslist/`（本体UI） | 403 |
+| `/tools/pluslist/api/employees`（名簿一覧） | 403 |
+| `/tools/pluslist/api/export/csv` | 403 |
+| `/manual/pluslist`（マニュアル） | 403 |
+| ShifterSync / CloudShift の社員候補サーチ | **使える**（社員番号・氏名・営業所名・役職名のみ） |
+| 住所・郵便番号・マンション名 | **返らない** |
+
+## レジストリ（app/tool_api.py）
+
+許可される経路は宣言的に一箇所へ集めてあります。ここに載っていない
+エンドポイントは、`api` 許可では一切通りません（＝従来どおり提供元ツールの
+通常許可が必要）。
+
+### `TOOL_API_CONSUMERS` — 誰が何を受け取れるか
+
+| 提供元 | 利用側 | `api` 許可で渡す項目 |
+| --- | --- | --- |
+| `pluslist` | `shiftersync` / `leave_mgr` / `to_bell` | `employee_number` / `employee_name` / `office_name` / `job_title` |
+| `siteplus` | `shiftersync` / `to_bell` | 制限なし（現場マスタは個人情報を含まない） |
+
+`powerstamp`（封筒の宛名差し込み）は **意図的に載せていません**。住所・郵便番号を
+画面に出す機能であり、それはまさに「従業員データを見る」ことなので、従来どおり
+社員名簿PLUSの通常許可を必要とします。
+
+### `TOOL_API_ENDPOINTS` — どのエンドポイントがツール間APIか
+
+| エンドポイント | 提供元 | 利用側 |
+| --- | --- | --- |
+| `pluslist.search_employee_api` | `pluslist` | `shiftersync` / `leave_mgr` |
+| `siteplus.api_cloudshift_sites` | `siteplus` | `shiftersync` |
+| `siteplus.api_cloudshift_branches` | `siteplus` | `shiftersync` |
+
+ToBell の紐付けAPI（`/tools/to_bell/api/links/...`）は ToBell 自身の Blueprint に
+あるため上表には出てきませんが、`_require_link_permission()` が
+`TOOL_API_CONSUMERS` を見て同じ基準で判定します。
+
+URL ではなく **Flask のエンドポイント名**（`<blueprint>.<関数名>`）で登録します。
+URL 変更で許可がずれないようにするためで、登録名が実在しなくなった場合は
+「許可しない」側に倒れます（起動時に `app.logger.error` で警告）。
+
+## 安全側に倒してある点
+
+- **参照専用のみ**：登録できるのは GET/HEAD のエンドポイントだけ。起動時に
+  `url_map` と突き合わせ、更新系メソッドを持つものは許可対象から外します
+  （`tests/test_tool_api_access.py` でも検証）。
+- **営業所スコープはそのまま**：提供元エンドポイント側の絞り込み
+  （`get_user_offices()` / `_accessible_office_codes()`）は `api` 許可でも従来どおり効きます。
+- **一覧の垂れ流しをしない**：社員候補サーチは検索語必須＋最大10件。
+- **既存の判定を汚さない**：`user_has_tool_access()` は `api` 許可を許可として
+  数えません。ナビゲーション表示・マニュアル・一斉通知の宛先はすべて従来のまま。
+- **非公開ツールは通さない**：ツール設定で非表示にした提供元ツールは、
+  ツール間API経由でも参照できません。
+- **権限テンプレートに巻き込まれない**：テンプレート適用は通常許可だけを同期し、
+  API専用許可の行には触れません（逆に、テンプレートで API 専用許可を配ることも
+  できません）。
+
+## 注意点
+
+- 社員候補サーチの営業所スコープは、社員名簿PLUS側の `get_user_offices()` が決めます。
+  この関数は DSTT の所属（支店/営業所）に加えて、社員名簿PLUS独自の管理者リスト
+  （`permissions.json` の `admins`）も見ます。そこに載っている利用者は、
+  API専用許可でも全営業所が検索対象になります（返す項目の制限は効きます）。
+  意図しない場合は、社員名簿PLUSの管理者タブから独自管理者の登録を外してください。
+- ToBell は公開ツールなので、`pluslist` に API 専用許可を付けると、その利用者は
+  ToBell のプロジェクト/タスク⇄社員の紐付け（識別情報のみ）も使えるようになります。
+
+## 制限事項
+
+- API専用許可は **ユーザー個別付与のみ** です。グループ付与
+  （支店/営業所/担当の一括ルール）は通常許可だけを扱います。
+  グループ付与のテーブルはユニーク制約に scope を含めておらず、
+  制約変更は既存DBへの影響が大きいため、今回は対象外にしました。
+- 権限テンプレートも通常許可だけを扱います。
+
+## 追加するとき
+
+1. 提供元エンドポイントが **参照専用** で、**営業所スコープの絞り込み済み** か確認する。
+2. `TOOL_API_CONSUMERS` に「利用側ツール → 渡してよい項目」を足す。
+   公開（`public`）ツールを利用側に足すと、実質「API専用許可だけで到達できる」
+   意味になるので慎重に。
+3. `TOOL_API_ENDPOINTS` にエンドポイント名を足す。
+4. 提供元エンドポイントの戻り値に `restrict_tool_api_rows()` を通す
+   （項目制限を宣言した場合）。
+5. `tests/test_tool_api_access.py` にケースを足す。
+
+## スキーマ
+
+`user_tool_permissions.scope VARCHAR(10) NOT NULL DEFAULT 'full'`
+
+既存行は `'full'`（＝従来どおりの通常許可）になります。起動時の
+`_ensure_access_control_schema()` が `ALTER TABLE` を流すため、SQLite / PostgreSQL とも
+別途の手作業は不要です。

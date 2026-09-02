@@ -10,6 +10,12 @@
   (`UserToolPermission`) を持たせ、管理者ページから設定できるようにする。
 - ダッシュボードのナビゲーションは、アクセスできるツールのみ表示する。
 - 個別のツール側では `require_tool_access` デコレータで強制的にガードする。
+- 個別付与には強さ（scope）がある。
+  * ``full`` : 従来どおりの通常許可。ツール本体のUI・全APIを使える。
+  * ``api``  : ツール間API専用許可。提供元ツール本体は開けず、``app.tool_api``
+               に登録されたツール間APIからの参照だけを許す。単独では何も見られず、
+               利用側ツール（例: ShifterSync）の通常許可との AND で初めて効く。
+               ナビゲーション表示・マニュアル・一斉通知の宛先には一切含めない。
 """
 
 from __future__ import annotations
@@ -17,7 +23,7 @@ from __future__ import annotations
 from functools import wraps
 from typing import Iterable
 
-from flask import abort, current_app, jsonify, redirect, request, url_for
+from flask import abort, current_app, g, jsonify, redirect, request, url_for
 from flask_login import current_user
 
 from .models import (
@@ -32,6 +38,16 @@ from .models import (
     db,
 )
 from .navigation import NAV_ITEMS
+from .tool_api import (
+    TOOL_SCOPE_API,
+    TOOL_SCOPE_FULL,
+    TOOL_SCOPES,
+    VALID_TOOL_API_ENDPOINTS,
+    ToolApiEndpoint,
+    api_consumers_for,
+    api_provider_tool_keys,
+    normalize_tool_scope,
+)
 
 
 # 初期管理者ID（旧実装の互換性のためハードコーディング）
@@ -125,14 +141,78 @@ def ensure_legacy_admin_flag() -> None:
 # ツールアクセス判定
 # ------------------------------------------------------------------
 
-def _user_granted_tool_keys(user) -> set[str]:
+_USER_TOOL_SCOPE_CACHE_ATTR = "_dstt_user_tool_scopes"
+
+
+def _user_tool_scope_cache() -> dict | None:
+    """個別付与のリクエスト内メモ化。
+
+    ツール間APIの判定は「提供元の付与」「利用側の付与」を続けて見るため、
+    素直に書くと1リクエストで同じ全件取得が何度も走る（社員候補サーチは
+    入力のたびに飛ぶ）。``_group_tool_rules()`` と同じくリクエスト境界で持つ。
+    """
+    try:
+        from flask import has_app_context
+
+        if not has_app_context():
+            return None
+        cache = getattr(g, _USER_TOOL_SCOPE_CACHE_ATTR, None)
+        if cache is None:
+            cache = {}
+            setattr(g, _USER_TOOL_SCOPE_CACHE_ATTR, cache)
+        return cache
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _invalidate_user_tool_scope_cache(user_id: int | None = None) -> None:
+    cache = _user_tool_scope_cache()
+    if cache is None:
+        return
+    if user_id is None:
+        cache.clear()
+    else:
+        cache.pop(int(user_id), None)
+
+
+def _user_tool_scopes(user) -> dict[str, str]:
+    """個別付与を ``{tool_key: scope}`` で返す。scope は 'full' / 'api'。"""
     if user is None or not getattr(user, "is_authenticated", False):
-        return set()
+        return {}
     user_id = getattr(user, "id", None)
     if not user_id:
-        return set()
+        return {}
+    cache = _user_tool_scope_cache()
+    if cache is not None and user_id in cache:
+        return cache[user_id]
     rows = UserToolPermission.query.filter_by(user_id=user_id).all()
-    return {row.tool_key for row in rows}
+    scopes = {row.tool_key: normalize_tool_scope(row.scope) for row in rows}
+    if cache is not None:
+        cache[user_id] = scopes
+    return scopes
+
+
+def _user_granted_tool_keys(user) -> set[str]:
+    """通常許可（scope='full'）で個別付与されたツールキー。
+
+    ツール間API専用許可（scope='api'）はここに含めない。含めてしまうと
+    ナビゲーション表示・マニュアル・Blueprintガードなど、既存の判定すべてが
+    「ツール本体を使ってよい」と誤解する。
+    """
+    return {
+        key
+        for key, scope in _user_tool_scopes(user).items()
+        if scope == TOOL_SCOPE_FULL
+    }
+
+
+def _user_api_granted_tool_keys(user) -> set[str]:
+    """ツール間API専用許可（scope='api'）が付与されたツールキー。"""
+    return {
+        key
+        for key, scope in _user_tool_scopes(user).items()
+        if scope == TOOL_SCOPE_API
+    }
 
 
 # ------------------------------------------------------------------
@@ -296,11 +376,162 @@ def user_has_tool_access(tool_key: str, user=None) -> bool:
     return False
 
 
-def username_has_tool_access(username: str, tool_key: str) -> bool:
+# ------------------------------------------------------------------
+# ツール間API（tool-to-tool API）判定
+# ------------------------------------------------------------------
+
+# 「このリクエストはツール間API専用許可で通した」ことを提供元エンドポイントへ
+# 伝えるためのリクエストローカルなフラグ。値は返してよい項目の集合
+# （``None`` は項目制限なし）。設定されるのは Blueprint ガードだけで、
+# 通常許可・管理者で通ったリクエストでは設定されない。
+_TOOL_API_FIELDS_ATTR = "_dstt_tool_api_fields"
+
+
+def tool_api_endpoint_spec(endpoint_name: str | None) -> ToolApiEndpoint | None:
+    """登録済み かつ 宣言に矛盾の無いツール間APIエンドポイントの定義。"""
+    if not endpoint_name:
+        return None
+    return VALID_TOOL_API_ENDPOINTS.get(endpoint_name)
+
+
+def _api_accessible_consumers(spec: ToolApiEndpoint, user) -> list[str]:
+    """このエンドポイントの利用側ツールのうち、ユーザーが通常許可を持つもの。"""
+    declared = api_consumers_for(spec.provider)
+    return [
+        consumer
+        for consumer in spec.consumers
+        if consumer in declared and user_has_tool_access(consumer, user)
+    ]
+
+
+def user_has_tool_api_access(provider: str, consumer: str | None = None, user=None) -> bool:
+    """提供元ツールへ「ツール間API経由で」到達してよいか。
+
+    True になるのは次のいずれか。
+      * 管理者
+      * 提供元ツールの通常アクセス権を持っている（従来どおり）
+      * 提供元ツールのAPI専用許可を持ち、かつ利用側ツールの通常アクセス権も持つ
+
+    ``consumer`` を省略した場合は、レジストリが宣言する利用側ツールのいずれかに
+    アクセスできれば True。
+    """
+    user = user if user is not None else current_user
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    declared = api_consumers_for(provider)
+    if not declared:
+        # ツール間APIを持たない提供元は、API専用許可の対象外。
+        return False
+    if consumer is not None and consumer not in declared:
+        return False
+    if is_admin_user(user):
+        return True
+    # 提供元ツールが非公開設定なら、ツール間API経由でも触らせない
+    # （従来の user_has_tool_access と同じ扱いにする）。
+    if not _is_tool_visible(provider):
+        return False
+    if user_has_tool_access(provider, user):
+        return True
+    if provider not in _user_api_granted_tool_keys(user):
+        return False
+    candidates = (consumer,) if consumer is not None else tuple(declared)
+    return any(user_has_tool_access(key, user) for key in candidates)
+
+
+def tool_api_endpoint_allowed(endpoint_name: str, user=None) -> bool:
+    """レジストリ登録済みエンドポイントへのアクセス可否。
+
+    未登録のエンドポイントは常に False（＝従来どおり提供元ツールの権限が必要）。
+    """
+    spec = tool_api_endpoint_spec(endpoint_name)
+    if spec is None:
+        return False
+    user = user if user is not None else current_user
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if is_admin_user(user):
+        return True
+    if not _is_tool_visible(spec.provider):
+        return False
+    if user_has_tool_access(spec.provider, user):
+        return True
+    if spec.provider not in _user_api_granted_tool_keys(user):
+        return False
+    return bool(_api_accessible_consumers(spec, user))
+
+
+def tool_api_allowed_fields(endpoint_name: str, user=None) -> frozenset[str] | None:
+    """API専用許可で返してよいレスポンス項目。``None`` は項目制限なし。
+
+    提供元ツールの通常アクセス権（または管理者）があれば従来どおり全項目。
+    """
+    spec = tool_api_endpoint_spec(endpoint_name)
+    if spec is None:
+        return None
+    user = user if user is not None else current_user
+    if is_admin_user(user):
+        return None
+    if user_has_tool_access(spec.provider, user):
+        return None
+    if spec.provider not in _user_api_granted_tool_keys(user):
+        # ここに来るのは想定外（ガードを通っていない）。安全側＝何も返さない。
+        return frozenset()
+    declared = api_consumers_for(spec.provider)
+    fields: set[str] = set()
+    for consumer in _api_accessible_consumers(spec, user):
+        limit = declared[consumer]
+        if limit is None:
+            return None
+        fields |= set(limit)
+    return frozenset(fields)
+
+
+def mark_tool_api_request(fields: frozenset[str] | None) -> None:
+    """このリクエストがツール間API専用許可で通ったことを記録する。"""
+    try:
+        setattr(g, _TOOL_API_FIELDS_ATTR, fields)
+    except RuntimeError:  # アプリケーションコンテキスト外
+        pass
+
+
+def tool_api_response_fields() -> frozenset[str] | None:
+    """現在のリクエストで返してよい項目。``None`` は項目制限なし。
+
+    Blueprint ガードが「API専用許可で通した」と記録した場合だけ集合が返る。
+    通常許可・管理者のリクエストでは何も記録されないため ``None`` になる。
+    """
+    try:
+        return getattr(g, _TOOL_API_FIELDS_ATTR, None)
+    except RuntimeError:
+        return None
+
+
+def restrict_tool_api_rows(rows: Iterable[dict]) -> list[dict]:
+    """レスポンス行を、このリクエストで返してよい項目だけに絞る。"""
+    allowed = tool_api_response_fields()
+    if allowed is None:
+        return list(rows)
+    return [{k: v for k, v in row.items() if k in allowed} for row in rows]
+
+
+def api_grantable_tool_keys() -> set[str]:
+    """ツール間API専用許可を付与できるツールキー。
+
+    レジストリに提供元として載っていて、かつ現在の設定で ``sensitive``
+    （＝通常許可が必要）なツールに限る。公開ツールに API 専用許可を付けても
+    意味がないため候補から外す。
+    """
+    return {key for key in api_provider_tool_keys() if tool_requires_permission(key)}
+
+
+def username_has_tool_access(username: str, tool_key: str, *, via_tool: str | None = None) -> bool:
     """username 指定でツールアクセス権を判定する。
 
     リクエスト外（スケジューラ・バックグラウンドジョブ）からも呼べるようにするため、
     ``current_user`` ではなく username から User を引く。
+
+    ``via_tool`` を渡すと「そのツールの機能としてツール間API経由で参照する」判定になり、
+    ``tool_key`` のAPI専用許可 + ``via_tool`` の通常許可でも True になる。
     """
     name = (username or "").strip()
     if not name:
@@ -310,16 +541,21 @@ def username_has_tool_access(username: str, tool_key: str) -> bool:
         return False
     # user_has_tool_access は is_authenticated を見るため、DB から引いた User でも
     # 判定できるよう UserMixin の既定値（True）に頼る。
+    if via_tool and via_tool in api_consumers_for(tool_key):
+        return user_has_tool_api_access(tool_key, via_tool, user)
     return user_has_tool_access(tool_key, user)
 
 
-def usernames_with_tool_access(usernames, tool_key: str) -> set[str]:
+def usernames_with_tool_access(usernames, tool_key: str, *, via_tool: str | None = None) -> set[str]:
     """複数ユーザーのツールアクセス権をまとめて判定する。
 
     1人ずつ ``username_has_tool_access()`` を呼ぶと、User の取得・個別付与の照会・
     グループ規則の評価が人数ぶん走る（連携の一斉通知では保存リクエストの中で
     数十〜数百クエリになる）。ツール単位の判定は1回で済ませ、個別付与は
     まとめて引き、グループ規則は必要な人にだけ評価する。
+
+    ``via_tool`` は :func:`username_has_tool_access` と同じ意味。指定した利用側ツールの
+    通常許可を持つ人に限り、``tool_key`` のツール間API専用許可も許可として数える。
     """
     names = {str(name).strip() for name in usernames if str(name or "").strip()}
     if not names:
@@ -335,16 +571,22 @@ def usernames_with_tool_access(usernames, tool_key: str) -> set[str]:
     if not tool_requires_permission(tool_key):
         return {user.username for user in users}
 
+    api_ok = bool(via_tool) and via_tool in api_consumers_for(tool_key)
+
     allowed = set(admins)
     undecided = [user for user in users if user.username not in allowed]
+    # API専用許可の候補（ツール間API経由の判定のときだけ意味を持つ）
+    api_scoped_ids: set[int] = set()
     if undecided:
-        granted_user_ids = {
-            row.user_id
-            for row in UserToolPermission.query.filter(
-                UserToolPermission.tool_key == tool_key,
-                UserToolPermission.user_id.in_([user.id for user in undecided]),
-            ).all()
-        }
+        granted_user_ids: set[int] = set()
+        for row in UserToolPermission.query.filter(
+            UserToolPermission.tool_key == tool_key,
+            UserToolPermission.user_id.in_([user.id for user in undecided]),
+        ).all():
+            if normalize_tool_scope(row.scope) == TOOL_SCOPE_API:
+                api_scoped_ids.add(row.user_id)
+            else:
+                granted_user_ids.add(row.user_id)
         allowed.update(user.username for user in undecided if user.id in granted_user_ids)
         undecided = [user for user in undecided if user.username not in allowed]
 
@@ -352,6 +594,13 @@ def usernames_with_tool_access(usernames, tool_key: str) -> set[str]:
     if undecided and any(rule.tool_key == tool_key for rule in _group_tool_rules()):
         for user in undecided:
             if tool_key in _group_granted_tool_keys(user):
+                allowed.add(user.username)
+        undecided = [user for user in undecided if user.username not in allowed]
+
+    # ツール間API経由の判定のときだけ、API専用許可 + 利用側ツールの通常許可を数える。
+    if api_ok and undecided:
+        for user in undecided:
+            if user.id in api_scoped_ids and user_has_tool_access(via_tool, user):
                 allowed.add(user.username)
     return allowed
 
@@ -538,7 +787,20 @@ def _wants_json() -> bool:
 # 一括付与/剥奪ユーティリティ
 # ------------------------------------------------------------------
 
-def grant_tool_access(user_id: int, tool_keys: Iterable[str], granted_by: str) -> None:
+def _validated_scope(scope: str) -> str:
+    if scope not in TOOL_SCOPES:
+        raise ValueError(f"不正なツール許可スコープです: {scope!r}")
+    return scope
+
+
+def grant_tool_access(
+    user_id: int,
+    tool_keys: Iterable[str],
+    granted_by: str,
+    scope: str = TOOL_SCOPE_FULL,
+) -> None:
+    """指定スコープの許可を追加する（既存行のスコープは変更しない）。"""
+    scope = _validated_scope(scope)
     existing = {
         row.tool_key
         for row in UserToolPermission.query.filter_by(user_id=user_id).all()
@@ -548,12 +810,15 @@ def grant_tool_access(user_id: int, tool_keys: Iterable[str], granted_by: str) -
         if key in existing:
             continue
         db.session.add(
-            UserToolPermission(user_id=user_id, tool_key=key, granted_by=granted_by)
+            UserToolPermission(
+                user_id=user_id, tool_key=key, scope=scope, granted_by=granted_by
+            )
         )
         existing.add(key)
         added = True
     if added:
         db.session.commit()
+        _invalidate_user_tool_scope_cache(user_id)
 
 
 def revoke_tool_access(user_id: int, tool_keys: Iterable[str]) -> None:
@@ -565,23 +830,74 @@ def revoke_tool_access(user_id: int, tool_keys: Iterable[str]) -> None:
         UserToolPermission.tool_key.in_(keys),
     ).delete(synchronize_session=False)
     db.session.commit()
+    _invalidate_user_tool_scope_cache(user_id)
 
 
-def set_tool_access(user_id: int, tool_keys: Iterable[str], granted_by: str) -> None:
-    """ユーザーのツール許可を、指定セットと完全一致するよう同期する。"""
-    desired = set(tool_keys)
+def set_tool_access_scopes(
+    user_id: int,
+    scopes: dict[str, str],
+    granted_by: str,
+    *,
+    managed_scopes: Iterable[str] = TOOL_SCOPES,
+) -> None:
+    """ユーザーのツール許可を ``{tool_key: scope}`` と一致するよう同期する。
+
+    ``managed_scopes`` に含まれるスコープの既存行だけを削除対象にする。
+    たとえば ``managed_scopes=('full',)`` なら、通常許可の付け外しだけを行い、
+    ツール間API専用許可の行はそのまま残す（権限テンプレートの適用など、
+    通常許可だけを扱う経路が API 専用許可を巻き添えで消さないようにするため）。
+    ただし ``scopes`` で明示されたツールは、既存行のスコープが何であっても
+    指定どおりに揃える（(user_id, tool_key) は一意のため）。
+    """
+    desired = {key: _validated_scope(scope) for key, scope in scopes.items()}
+    managed = {_validated_scope(scope) for scope in managed_scopes}
+
     existing_rows = UserToolPermission.query.filter_by(user_id=user_id).all()
     existing = {row.tool_key: row for row in existing_rows}
 
-    to_add = desired - set(existing.keys())
-    to_remove = set(existing.keys()) - desired
+    changed = False
+    for key, scope in desired.items():
+        row = existing.get(key)
+        if row is None:
+            db.session.add(
+                UserToolPermission(
+                    user_id=user_id, tool_key=key, scope=scope, granted_by=granted_by
+                )
+            )
+            changed = True
+            continue
+        if normalize_tool_scope(row.scope) != scope:
+            row.scope = scope
+            row.granted_by = granted_by
+            changed = True
 
-    for key in to_add:
-        db.session.add(
-            UserToolPermission(user_id=user_id, tool_key=key, granted_by=granted_by)
-        )
-    for key in to_remove:
-        db.session.delete(existing[key])
+    for key, row in existing.items():
+        if key in desired:
+            continue
+        if normalize_tool_scope(row.scope) not in managed:
+            continue
+        db.session.delete(row)
+        changed = True
 
-    if to_add or to_remove:
+    if changed:
         db.session.commit()
+        _invalidate_user_tool_scope_cache(user_id)
+
+
+def set_tool_access(
+    user_id: int,
+    tool_keys: Iterable[str],
+    granted_by: str,
+    scope: str = TOOL_SCOPE_FULL,
+) -> None:
+    """指定スコープの許可を、指定セットと完全一致するよう同期する。
+
+    既定では通常許可（full）だけを同期し、ツール間API専用許可には触れない。
+    """
+    scope = _validated_scope(scope)
+    set_tool_access_scopes(
+        user_id,
+        {key: scope for key in tool_keys},
+        granted_by,
+        managed_scopes=(scope,),
+    )

@@ -1557,6 +1557,7 @@ function renderUsers() {
   tbody.innerHTML = pageRows.map(u => {
     const personalCount = (u.tool_keys || []).length;
     const groupCount = (u.group_tool_keys || []).length;
+    const apiCount = (u.api_tool_keys || []).length;
     return `
     <tr class="border-t hover:bg-slate-50 align-top">
       <td class="p-2 text-center"><input type="checkbox" class="user-row-check mt-1.5" data-uid="${u.id}" ${state.userSelected.has(u.id) ? 'checked' : ''}></td>
@@ -1569,6 +1570,7 @@ function renderUsers() {
       <td class="p-3 whitespace-nowrap">
         <span class="admin-chip is-ok">個人 ${personalCount}</span>
         <span class="admin-chip ml-1">グループ ${groupCount}</span>
+        ${apiCount ? `<span class="admin-chip ml-1" title="ツール間API専用許可（ツール本体は開けません）">API ${apiCount}</span>` : ''}
       </td>
       <td class="p-3 whitespace-nowrap" title="${u.last_login_at ? escape(fmtDate(u.last_login_at)) : 'ログイン記録なし'}">
         ${u.last_login_at ? `<div>${fmtRelative(u.last_login_at)}</div><div class="text-xs text-slate-400">${fmtDateMin(u.last_login_at)}</div>` : '<span class="text-slate-400">-</span>'}
@@ -1702,7 +1704,7 @@ $('#form-user-bulk')?.addEventListener('submit', async (e) => {
 function exportUsersCsv() {
   const rows = sortedFilteredUsers();
   if (!rows.length) { toast('出力対象のユーザーがいません。', 'info'); return; }
-  const header = ['ユーザーID', '日本語名', '権限', '支店', '支店コード', '営業所', '営業所コード', '担当', '個人権限数', 'グループ権限数', '最終ログイン'];
+  const header = ['ユーザーID', '日本語名', '権限', '支店', '支店コード', '営業所', '営業所コード', '担当', '個人権限数', 'グループ権限数', 'ツール間API専用許可数', '最終ログイン'];
   const csvCell = (v) => {
     const s = String(v ?? '');
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -1720,6 +1722,7 @@ function exportUsersCsv() {
       u.department_name || '',
       (u.tool_keys || []).length,
       (u.group_tool_keys || []).length,
+      (u.api_tool_keys || []).length,
       u.last_login_at ? fmtDate(u.last_login_at) : '',
     ].map(csvCell).join(','));
   });
@@ -2371,14 +2374,17 @@ function renderPermissionGrid() {
     return;
   }
   const grantedSet = new Set(user.tool_keys || []);
+  const apiGrantedSet = new Set(user.api_tool_keys || []);
   const groupSet = new Set(user.group_tool_keys || []);
   const groupSources = user.group_tool_sources || {};
   const html = state.tools.map(t => {
     const isSensitive = t.category === 'sensitive';
     const byGroup = isSensitive && groupSet.has(t.key);
     const byIndividual = isSensitive && grantedSet.has(t.key);
+    const byApi = isSensitive && apiGrantedSet.has(t.key);
     const checked = isSensitive ? byIndividual : true;
     const disabled = !isSensitive || user.is_admin;
+    const apiGrantable = isSensitive && !!t.api_grantable;
     const badges = [
       isSensitive
         ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">🔒 要許可</span>'
@@ -2386,6 +2392,9 @@ function renderPermissionGrid() {
     ];
     if (byGroup) {
       badges.push('<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded">🏷️ グループ許可</span>');
+    }
+    if (byApi) {
+      badges.push('<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">🔗 ツール間APIのみ</span>');
     }
     if (isSensitive && user.is_admin) {
       badges.push('<span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded">👑 管理者のため全許可</span>');
@@ -2404,31 +2413,75 @@ function renderPermissionGrid() {
           ${indivNote}
         </div>`;
     }
+    let apiRow = '';
+    if (apiGrantable) {
+      const consumers = (t.api_consumers || []).map(k => toolLabelFor(k)).join('・');
+      apiRow = `
+        <label class="mt-2 flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 rounded px-2 py-1 ${disabled ? 'opacity-70' : 'cursor-pointer'}">
+          <input type="checkbox" class="perm-api-cb mt-0.5" data-key="${t.key}" ${byApi ? 'checked' : ''} ${disabled || checked ? 'disabled' : ''}>
+          <span class="text-amber-900">
+            <span class="font-medium">ツール間APIのみ許可</span>
+            <span class="block text-[11px] text-amber-800">
+              このツール自体は開けません。${consumers ? escape(consumers) + ' からの' : ''}ツール間API経由の参照だけを許可します
+              （利用側ツールの許可も別途必要）。
+            </span>
+          </span>
+        </label>`;
+    }
     const cardBg = byGroup
       ? 'bg-purple-50/40 border-purple-200'
-      : (disabled ? 'bg-gray-50 opacity-70' : 'hover:bg-blue-50 cursor-pointer');
+      : (disabled ? 'bg-gray-50 opacity-70' : 'hover:bg-blue-50');
     return `
-      <label class="flex items-start gap-2 border rounded p-3 ${cardBg}">
-        <input type="checkbox" class="perm-cb mt-1" data-key="${t.key}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
-        <div class="flex-1">
-          <div class="font-medium">${t.icon || ''} ${escape(t.label)}</div>
-          <div class="text-xs text-gray-600">${escape(t.description || '')}</div>
-          <div class="mt-1 flex flex-wrap gap-1">${badges.join('')}</div>
-          ${groupDetail}
-        </div>
-      </label>`;
+      <div class="border rounded p-3 ${cardBg}">
+        <label class="flex items-start gap-2 ${disabled ? '' : 'cursor-pointer'}">
+          <input type="checkbox" class="perm-cb mt-1" data-key="${t.key}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+          <div class="flex-1">
+            <div class="font-medium">${t.icon || ''} ${escape(t.label)}</div>
+            <div class="text-xs text-gray-600">${escape(t.description || '')}</div>
+            <div class="mt-1 flex flex-wrap gap-1">${badges.join('')}</div>
+            ${groupDetail}
+          </div>
+        </label>
+        ${apiRow}
+      </div>`;
   }).join('');
   $('#perm-tool-grid').innerHTML = html;
+  $$('#perm-tool-grid .perm-cb').forEach(cb => {
+    cb.addEventListener('change', syncApiPermCheckboxes);
+  });
+}
+
+// 通常許可を付けたツールは「ツール間APIのみ」を選べない（同じツールに2種類の
+// 許可は持てず、通常許可の方が広いため）。テンプレート反映のように change が
+// 飛ばない経路からも呼べるよう関数にしておく。
+function syncApiPermCheckboxes() {
+  $$('#perm-tool-grid .perm-api-cb').forEach(api => {
+    const main = $(`#perm-tool-grid .perm-cb[data-key="${api.dataset.key}"]`);
+    if (!main) return;
+    if (main.disabled) return;
+    if (main.checked) {
+      api.checked = false;
+      api.disabled = true;
+    } else {
+      api.disabled = false;
+    }
+  });
+}
+
+function toolLabelFor(key) {
+  const tool = (state.tools || []).find(t => t.key === key);
+  return tool ? tool.label : key;
 }
 
 $('#btn-perm-save').addEventListener('click', async () => {
   const userId = parseInt($('#perm-user-select').value);
   if (!userId) return toast('ユーザーを選択してください。', 'info');
   const selected = $$('#perm-tool-grid .perm-cb:checked:not(:disabled)').map(cb => cb.dataset.key);
+  const apiSelected = $$('#perm-tool-grid .perm-api-cb:checked:not(:disabled)').map(cb => cb.dataset.key);
   try {
     await api(`/tools/user_management/api/users/${userId}/tools`, {
       method: 'PUT',
-      body: { tool_keys: selected }
+      body: { tool_keys: selected, api_tool_keys: apiSelected }
     });
     toast('ツールアクセス権を保存しました。');
     loadPermissions();
@@ -4014,7 +4067,8 @@ $('#btn-perm-template-apply')?.addEventListener('click', () => {
   if (!boxes.length) return toast('先にユーザーを選択してください。', 'info');
   const keys = new Set(template.tool_keys || []);
   boxes.forEach(cb => { cb.checked = keys.has(cb.dataset.key); });
-  toast(`「${template.name}」を反映しました。「保存」で確定します。`, 'info');
+  syncApiPermCheckboxes();
+  toast(`「${template.name}」を反映しました。ツール間API専用許可はテンプレートの対象外です。「保存」で確定します。`, 'info');
 });
 
 $('#btn-perm-template-save')?.addEventListener('click', () => {
