@@ -1673,7 +1673,15 @@ def clear_office_data():
 @pluslist_bp.route("/api/search_employee")
 @login_required
 def search_employee_api():
-    """他のツールから社員情報を検索するAPI"""
+    """他のツールから社員情報を検索するAPI（ツール間API）。
+
+    社員名簿PLUS本体の許可が無くても、ツール間API専用許可（scope='api'）と
+    利用側ツール（ShifterSync / 有休共有ツール）の許可があれば呼べる。
+    その場合は本人特定に必要な項目だけを返し、住所・郵便番号などは返さない
+    （返す項目は app/tool_api.py の TOOL_API_CONSUMERS で宣言する）。
+    """
+    from app.access_control import restrict_tool_api_rows
+
     user_id = str(current_user.username)
     user_offices = get_user_offices(user_id)
 
@@ -1693,7 +1701,7 @@ def search_employee_api():
         )
     ).limit(10).all()
 
-    return jsonify([{
+    return jsonify(restrict_tool_api_rows([{
         'employee_number': e.employee_number,
         'employee_name': e.employee_name,
         'office_name': e.office_name,
@@ -1702,7 +1710,7 @@ def search_employee_api():
         'address1': e.address1,
         'address2': e.address2,
         'mansion_name': e.mansion_name
-    } for e in employees])
+    } for e in employees]))
 
 
 # ===== 賃金情報機能 =====

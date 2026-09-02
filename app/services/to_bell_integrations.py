@@ -83,8 +83,18 @@ INTEGRATION_TOOL_REQUIREMENTS = {
 }
 
 
+# ToBell から見た「利用側ツールキー」。ツール間API専用許可の判定に使う
+# （app/tool_api.py の TOOL_API_CONSUMERS に to_bell として宣言してある）。
+INTEGRATION_CONSUMER_TOOL = "to_bell"
+
+
 def has_tool_access(username: str, integration_key: str) -> bool:
-    """連携先ツールへのアクセス権があるか。ツール指定の無い連携は常に True。"""
+    """連携先ツールへのアクセス権があるか。ツール指定の無い連携は常に True。
+
+    連携先ツール本体の通常許可に加えて、「ツール間API専用許可」でも許可する。
+    ToBell の紐付けは提供元ツールのマスタを ToBell 経由で参照する典型的な
+    ツール間APIであり、返す項目も社員番号・氏名・営業所名などの識別情報に限られる。
+    """
     tool_key = INTEGRATION_TOOL_REQUIREMENTS.get(integration_key)
     if tool_key is None:
         return True
@@ -95,7 +105,9 @@ def has_tool_access(username: str, integration_key: str) -> bool:
     try:
         from app.access_control import username_has_tool_access
 
-        allowed = username_has_tool_access(username, tool_key)
+        allowed = username_has_tool_access(
+            username, tool_key, via_tool=INTEGRATION_CONSUMER_TOOL
+        )
     except Exception:  # noqa: BLE001 - 判定できないときは安全側（不許可）
         allowed = False
     if cache is not None:
@@ -255,7 +267,11 @@ def enabled_users(integration_key: str) -> list[str]:
     # （1人ずつ判定すると、CloudShift の一斉通知が人数ぶんの全件スキャンを伴う）。
     from app.access_control import usernames_with_tool_access
 
-    allowed = usernames_with_tool_access(candidates, tool_key)
+    # has_tool_access と同じ基準で判定する（キャッシュを共有するため、
+    # ここだけ基準がずれると同じキーに別意味の結果が入ってしまう）。
+    allowed = usernames_with_tool_access(
+        candidates, tool_key, via_tool=INTEGRATION_CONSUMER_TOOL
+    )
     cache = _tool_access_cache()
     if cache is not None:
         for username in candidates:

@@ -184,7 +184,15 @@ class UserAccessibleOffice(db.Model):
 
 
 class UserToolPermission(db.Model):
-    """個別ツールアクセス権付与"""
+    """個別ツールアクセス権付与。
+
+    ``scope`` は許可の強さを表す。
+      * ``full`` … 従来どおりの通常許可（ツール本体のUI・全APIを利用できる）
+      * ``api``  … ツール間API専用許可。提供元ツール本体は開けず、
+                   ``app.tool_api`` に登録されたツール間API経由の参照だけを許す。
+                   単独では何も参照できず、利用側ツールの通常許可との AND で効く。
+    (user_id, tool_key) は一意なので、1ユーザー1ツールにつき scope はひとつ。
+    """
     __tablename__ = 'user_tool_permissions'
     __table_args__ = (
         db.UniqueConstraint('user_id', 'tool_key', name='uq_user_tool_permission'),
@@ -193,6 +201,9 @@ class UserToolPermission(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     tool_key = db.Column(db.String(80), nullable=False, index=True)
+    scope = db.Column(
+        db.String(10), nullable=False, default='full', server_default='full'
+    )
     granted_by = db.Column(db.String(80), nullable=True)
     granted_at = db.Column(db.DateTime, default=utc_now)
 
@@ -203,6 +214,7 @@ class UserToolPermission(db.Model):
             'id': self.id,
             'user_id': self.user_id,
             'tool_key': self.tool_key,
+            'scope': self.scope or 'full',
             'granted_by': self.granted_by,
             'granted_at': self.granted_at.isoformat() if self.granted_at else None,
         }
