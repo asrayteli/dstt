@@ -603,12 +603,27 @@
   <section id="tab-permissions" class="admin-section hidden">
     <div class="bg-white rounded-xl shadow p-6">
       <h2 class="text-xl font-semibold mb-4">ツールアクセス権の付与</h2>
-      <p class="text-sm text-gray-600 mb-4">
+      <p class="text-sm text-gray-600 mb-3">
         「🔒 要許可」のツールは、個別に付与しないと利用できません。
         「🌐 公開」は全ログインユーザーが利用できます。<br>
         管理者はすべてのツールにアクセスできます。<br>
         「🏷️ グループ許可」は「グループ付与」タブで設定されたルールにより、このユーザーが所属する支店・営業所・担当から自動的に許可されているツールです。個人チェックを外してもグループからのアクセスは解除されません。
       </p>
+      <div class="mb-4 text-xs text-gray-700 border rounded bg-slate-50 px-3 py-2">
+        <div class="font-medium mb-1">許可の読み方（各カード右上のバッジが実際に効いている状態です）</div>
+        <ul class="space-y-0.5">
+          <li><span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">✅ 通常許可（個人付与）</span> / <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800">✅ 通常許可（グループ付与）</span> … ツール本体を使えます</li>
+          <li><span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900">🔗 ツール間APIのみ</span> … ツール本体は開けず、他ツールからの参照APIだけ使えます</li>
+          <li><span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">⛔ 許可なし</span> / <span class="px-1.5 py-0.5 rounded bg-gray-200 text-gray-700">🚫 非表示ツール</span> … 使えません</li>
+        </ul>
+        <div class="mt-1 text-[11px] text-gray-600">
+          <b>個別付与 &gt; グループ付与</b>です。個人に「ツール間APIのみ許可」を付けると、
+          グループ付与で通常許可の対象になっていてもツール本体は開けなくなります
+          （まとめて配るグループ付与より、名指しの個別付与を優先します）。
+        </div>
+      </div>
+
+      <div id="perm-summary" class="mb-4"></div>
 
       <div class="mb-4 flex items-center gap-3">
         <label class="text-sm font-medium">ユーザーを選択:</label>
@@ -1555,9 +1570,7 @@ function renderUsers() {
     return;
   }
   tbody.innerHTML = pageRows.map(u => {
-    const personalCount = (u.tool_keys || []).length;
-    const groupCount = (u.group_tool_keys || []).length;
-    const apiCount = (u.api_tool_keys || []).length;
+    const c = permCounts(u);
     return `
     <tr class="border-t hover:bg-slate-50 align-top">
       <td class="p-2 text-center"><input type="checkbox" class="user-row-check mt-1.5" data-uid="${u.id}" ${state.userSelected.has(u.id) ? 'checked' : ''}></td>
@@ -1568,9 +1581,11 @@ function renderUsers() {
       <td class="p-3">${escape(u.office_name || '-')}${u.office_code ? ' <span class="text-xs font-mono text-blue-700">[' + escape(u.office_code) + ']</span>' : ''}</td>
       <td class="p-3">${escape(u.department_name || '-')}</td>
       <td class="p-3 whitespace-nowrap">
-        <span class="admin-chip is-ok">個人 ${personalCount}</span>
-        <span class="admin-chip ml-1">グループ ${groupCount}</span>
-        ${apiCount ? `<span class="admin-chip ml-1" title="ツール間API専用許可（ツール本体は開けません）">API ${apiCount}</span>` : ''}
+        ${u.is_admin
+          ? '<span class="admin-chip is-warn" title="管理者はすべてのツールを利用できます">👑 全許可</span>'
+          : `<span class="admin-chip is-ok" title="実際にツール本体を使える要許可ツールの数（個人付与＋グループ付与）">通常 ${c.full}</span>
+             <span class="admin-chip ml-1" title="うちグループ付与によるもの">グループ ${c.group}</span>
+             ${c.api ? `<span class="admin-chip is-warn ml-1" title="ツール間API専用許可（ツール本体は開けません）">APIのみ ${c.api}</span>` : ''}`}
       </td>
       <td class="p-3 whitespace-nowrap" title="${u.last_login_at ? escape(fmtDate(u.last_login_at)) : 'ログイン記録なし'}">
         ${u.last_login_at ? `<div>${fmtRelative(u.last_login_at)}</div><div class="text-xs text-slate-400">${fmtDateMin(u.last_login_at)}</div>` : '<span class="text-slate-400">-</span>'}
@@ -1704,7 +1719,7 @@ $('#form-user-bulk')?.addEventListener('submit', async (e) => {
 function exportUsersCsv() {
   const rows = sortedFilteredUsers();
   if (!rows.length) { toast('出力対象のユーザーがいません。', 'info'); return; }
-  const header = ['ユーザーID', '日本語名', '権限', '支店', '支店コード', '営業所', '営業所コード', '担当', '個人権限数', 'グループ権限数', 'ツール間API専用許可数', '最終ログイン'];
+  const header = ['ユーザーID', '日本語名', '権限', '支店', '支店コード', '営業所', '営業所コード', '担当', '通常許可数', 'うちグループ付与数', 'ツール間APIのみ数', '最終ログイン'];
   const csvCell = (v) => {
     const s = String(v ?? '');
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -1720,9 +1735,9 @@ function exportUsersCsv() {
       u.office_name || '',
       u.office_code || '',
       u.department_name || '',
-      (u.tool_keys || []).length,
-      (u.group_tool_keys || []).length,
-      (u.api_tool_keys || []).length,
+      u.is_admin ? '全許可' : permCounts(u).full,
+      u.is_admin ? '全許可' : permCounts(u).group,
+      u.is_admin ? '全許可' : permCounts(u).api,
       u.last_login_at ? fmtDate(u.last_login_at) : '',
     ].map(csvCell).join(','));
   });
@@ -2366,53 +2381,132 @@ function formatGroupScope(src) {
   return parts.length ? parts.join(' / ') : '（任意）';
 }
 
+// ツールごとの実効的な許可状態（サーバの describe_tool_access と1:1）。
+// state: full=ツール本体を使える / api=ツール間API経由の参照だけ / none=使えない
+const PERM_STATE_VIEW = {
+  full: {
+    admin:      { chip: '👑 全許可', cls: 'bg-slate-700 text-white',      note: '管理者のためすべてのツールを利用できます。' },
+    public:     { chip: '🌐 公開ツール', cls: 'bg-green-100 text-green-800', note: 'ログインしていれば誰でも利用できます。' },
+    individual: { chip: '✅ 通常許可（個人付与）', cls: 'bg-blue-100 text-blue-800',   note: 'ツール本体の画面とAPIをすべて利用できます。' },
+    group:      { chip: '✅ 通常許可（グループ付与）', cls: 'bg-purple-100 text-purple-800', note: '所属のグループルールにより、ツール本体をすべて利用できます。' },
+  },
+  api: {
+    individual: { chip: '🔗 ツール間APIのみ', cls: 'bg-amber-100 text-amber-900', note: 'ツール本体は開けません。他ツールからの参照APIだけを利用できます。' },
+  },
+  none: {
+    hidden: { chip: '🚫 非表示ツール', cls: 'bg-gray-200 text-gray-700', note: 'ツール設定で非表示のため、管理者以外は利用できません。' },
+    none:   { chip: '⛔ 許可なし', cls: 'bg-gray-100 text-gray-600',   note: 'このツールは利用できません。' },
+  },
+};
+
+function permStateView(access) {
+  const byState = PERM_STATE_VIEW[access?.state] || {};
+  return byState[access?.source] || PERM_STATE_VIEW.none.none;
+}
+
+// tool_access には要許可ツールだけが入る。公開ツールは誰でも使えるので補う。
+function permAccessFor(user, tool) {
+  const access = (user.tool_access || {})[tool.key];
+  if (access) return access;
+  if (tool.category !== 'sensitive') {
+    return { state: 'full', source: 'public', by_group: false, group_overridden: false };
+  }
+  return { state: 'none', source: 'none', by_group: false, group_overridden: false };
+}
+
+// 一覧・CSV用。サーバが解決した実効状態（tool_access）から数える。
+// 「グループ付与だが個人のAPI専用許可で打ち消されている」ものは通常許可に数えない。
+function permCounts(u) {
+  const access = u.tool_access || {};
+  const counts = { full: 0, group: 0, api: 0 };
+  Object.values(access).forEach(a => {
+    if (a.source === 'admin' || a.source === 'public') return;
+    if (a.state === 'full') {
+      counts.full += 1;
+      if (a.source === 'group') counts.group += 1;
+    } else if (a.state === 'api') {
+      counts.api += 1;
+    }
+  });
+  return counts;
+}
+
+function renderPermissionSummary(user) {
+  const box = $('#perm-summary');
+  if (!box) return;
+  const access = user.tool_access || {};
+  const sensitive = state.tools.filter(t => t.category === 'sensitive');
+  const head = `<span class="font-medium">${escape(user.username)}（${escape(user.name)}）の要許可ツール ${sensitive.length}件:</span>`;
+  if (user.is_admin) {
+    box.innerHTML = `
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        ${head}
+        <span class="admin-chip is-warn">👑 管理者のためすべて利用できます</span>
+      </div>`;
+    return;
+  }
+  const c = permCounts(user);
+  const none = Math.max(sensitive.length - c.full - c.api, 0);
+  const overridden = sensitive.filter(t => (access[t.key] || {}).group_overridden);
+  const note = overridden.length
+    ? `<div class="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+         ⚠️ ${overridden.map(t => escape(t.label)).join('・')} は、グループ付与で通常許可の対象ですが、
+         個人の「ツール間APIのみ許可」が優先されています（個別付与 &gt; グループ付与）。
+       </div>`
+    : '';
+  box.innerHTML = `
+    <div class="flex flex-wrap items-center gap-2 text-sm">
+      ${head}
+      <span class="admin-chip is-ok" title="ツール本体を使える数">通常許可 ${c.full}</span>
+      <span class="admin-chip" title="通常許可のうち、グループ付与によるもの">うちグループ ${c.group}</span>
+      <span class="admin-chip is-warn" title="ツール本体は開けず、ツール間APIの参照だけ">ツール間APIのみ ${c.api}</span>
+      <span class="admin-chip">許可なし ${none}</span>
+    </div>
+    ${note}`;
+}
+
 function renderPermissionGrid() {
   const userId = parseInt($('#perm-user-select').value);
   const user = state.users.find(u => u.id === userId);
   if (!user) {
     $('#perm-tool-grid').innerHTML = '<p class="text-sm text-gray-500 col-span-full">ユーザーを選択してください。</p>';
+    if ($('#perm-summary')) $('#perm-summary').innerHTML = '';
     return;
   }
+  renderPermissionSummary(user);
   const grantedSet = new Set(user.tool_keys || []);
   const apiGrantedSet = new Set(user.api_tool_keys || []);
   const groupSet = new Set(user.group_tool_keys || []);
   const groupSources = user.group_tool_sources || {};
   const html = state.tools.map(t => {
     const isSensitive = t.category === 'sensitive';
+    const access = permAccessFor(user, t);
+    const view = permStateView(access);
     const byGroup = isSensitive && groupSet.has(t.key);
     const byIndividual = isSensitive && grantedSet.has(t.key);
     const byApi = isSensitive && apiGrantedSet.has(t.key);
     const checked = isSensitive ? byIndividual : true;
     const disabled = !isSensitive || user.is_admin;
     const apiGrantable = isSensitive && !!t.api_grantable;
-    const badges = [
-      isSensitive
-        ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">🔒 要許可</span>'
-        : '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">🌐 公開</span>'
-    ];
-    if (byGroup) {
-      badges.push('<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded">🏷️ グループ許可</span>');
-    }
-    if (byApi) {
-      badges.push('<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">🔗 ツール間APIのみ</span>');
-    }
-    if (isSensitive && user.is_admin) {
-      badges.push('<span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded">👑 管理者のため全許可</span>');
-    }
+
     let groupDetail = '';
     if (byGroup) {
       const sources = groupSources[t.key] || [];
       const lines = sources.map(s => `・${formatGroupScope(s)}`).join('<br>');
-      const indivNote = byIndividual
-        ? ''
-        : '<div class="text-[11px] text-purple-700 mt-0.5">※ 個人付与はありませんが、グループルールにより許可されています。</div>';
+      const overridden = !!access.group_overridden;
+      const indivNote = overridden
+        ? '<div class="text-[11px] text-amber-800 mt-0.5">※ 個人の「ツール間APIのみ許可」が優先されるため、このグループ許可は効いていません。</div>'
+        : (byIndividual
+          ? ''
+          : '<div class="text-[11px] text-purple-700 mt-0.5">※ 個人付与はありませんが、グループルールにより許可されています。</div>');
       groupDetail = `
-        <div class="mt-1 text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded px-2 py-1">
+        <div class="mt-1 text-xs ${overridden ? 'text-gray-600 bg-gray-50 border-gray-200' : 'text-purple-800 bg-purple-50 border-purple-200'} border rounded px-2 py-1">
           <div class="font-medium">🏷️ グループ許可の付与元</div>
           <div class="mt-0.5">${lines || '・（任意）'}</div>
           ${indivNote}
         </div>`;
     }
+
     let apiRow = '';
     if (apiGrantable) {
       const consumers = (t.api_consumers || []).map(k => toolLabelFor(k)).join('・');
@@ -2423,22 +2517,28 @@ function renderPermissionGrid() {
             <span class="font-medium">ツール間APIのみ許可</span>
             <span class="block text-[11px] text-amber-800">
               このツール自体は開けません。${consumers ? escape(consumers) + ' からの' : ''}ツール間API経由の参照だけを許可します
-              （利用側ツールの許可も別途必要）。
+              （利用側ツールの許可も別途必要／グループ付与より優先）。
             </span>
           </span>
         </label>`;
     }
-    const cardBg = byGroup
-      ? 'bg-purple-50/40 border-purple-200'
-      : (disabled ? 'bg-gray-50 opacity-70' : 'hover:bg-blue-50');
+
+    const cardBg = access.state === 'api'
+      ? 'bg-amber-50/40 border-amber-200'
+      : (byGroup && access.state === 'full'
+        ? 'bg-purple-50/40 border-purple-200'
+        : (disabled ? 'bg-gray-50 opacity-70' : 'hover:bg-blue-50'));
     return `
       <div class="border rounded p-3 ${cardBg}">
         <label class="flex items-start gap-2 ${disabled ? '' : 'cursor-pointer'}">
           <input type="checkbox" class="perm-cb mt-1" data-key="${t.key}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
           <div class="flex-1">
-            <div class="font-medium">${t.icon || ''} ${escape(t.label)}</div>
+            <div class="flex items-start justify-between gap-2">
+              <div class="font-medium">${t.icon || ''} ${escape(t.label)}</div>
+              <span class="text-xs px-2 py-0.5 rounded whitespace-nowrap ${view.cls}">${view.chip}</span>
+            </div>
             <div class="text-xs text-gray-600">${escape(t.description || '')}</div>
-            <div class="mt-1 flex flex-wrap gap-1">${badges.join('')}</div>
+            <div class="mt-1 text-[11px] text-gray-700">${view.note}</div>
             ${groupDetail}
           </div>
         </label>

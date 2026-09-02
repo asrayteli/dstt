@@ -29,8 +29,10 @@ from app.services import mail_service
 from app.services import mail_inbox
 from app.security.password_policy import password_policy_error
 from app.access_control import (
+    TOOL_ACCESS_CATEGORIES,
     _user_satisfies_group_rule,
     api_grantable_tool_keys,
+    describe_tool_access,
     is_admin_user,
     is_legacy_admin_username,
     set_tool_access,
@@ -99,6 +101,60 @@ def _scoped_tool_keys(user: User, scope: str) -> list[str]:
     )
 
 
+def _tool_access_context() -> dict[str, dict]:
+    """権限表示に必要なツール単位の情報を1回だけ引く。
+
+    ユーザーごとに ``tool_category()`` / ``_is_tool_visible()`` を呼ぶと
+    人数×ツール数だけ照会が走るため、ToolSettings をまとめて読む。
+    含めるのは「要許可（sensitive）」のツールだけ。公開ツールは誰でも使えて
+    表示も一定なので、ユーザー数×ツール数ぶんの往復に載せる意味がない。
+    """
+    settings = {ts.tool_key: ts for ts in ToolSettings.query.all()}
+    context: dict[str, dict] = {}
+    for nav in NAV_ITEMS:
+        key = _nav_tool_key(nav)
+        if not key:
+            continue
+        ts = settings.get(key)
+        access_type = ts.access_type if ts else TOOL_ACCESS_CATEGORIES.get(key, "public")
+        if access_type != "sensitive":
+            continue
+        context[key] = {
+            "requires_permission": True,
+            "is_visible": ts.is_visible if ts else True,
+        }
+    return context
+
+
+def _user_tool_access_states(
+    user: User,
+    group_keys: set[str],
+    tool_context: dict[str, dict],
+    *,
+    admin: bool,
+) -> dict[str, dict]:
+    """要許可ツールごとの実効的な許可状態（管理画面の表示用）。
+
+    判定は :func:`app.access_control.describe_tool_access` に任せる。画面側で
+    組み立て直すと実挙動とずれるため、状態はサーバで解決して渡す。
+    """
+    scopes = {
+        perm.tool_key: normalize_tool_scope(perm.scope)
+        for perm in user.tool_permissions
+    }
+    return {
+        key: describe_tool_access(
+            key,
+            is_admin=admin,
+            individual_scope=scopes.get(key),
+            by_group=key in group_keys,
+            requires_permission=meta["requires_permission"],
+            is_visible=meta["is_visible"],
+        )
+        for key, meta in tool_context.items()
+    }
+
+
 def _user_matching_group_rules(user: User, rules) -> dict:
     """ユーザーに適用されるグループ付与ルールを tool_key 毎にまとめて返す。
 
@@ -130,7 +186,9 @@ def _last_login_map() -> dict:
     return {username: logged_in_at for username, logged_in_at in rows}
 
 
-def _serialize_user(user: User, group_rules=None, last_login_map=None) -> dict:
+def _serialize_user(
+    user: User, group_rules=None, last_login_map=None, tool_context=None
+) -> dict:
     extra_offices = (
         UserAccessibleOffice.query.filter_by(user_id=user.id).all()
         if user.id is not None
@@ -138,13 +196,19 @@ def _serialize_user(user: User, group_rules=None, last_login_map=None) -> dict:
     )
     if group_rules is None:
         group_rules = GroupToolPermission.query.all()
+    if tool_context is None:
+        tool_context = _tool_access_context()
     group_sources = _user_matching_group_rules(user, group_rules)
     last_login = (last_login_map or {}).get(user.username)
+    admin = is_admin_user(user)
+    access_states = _user_tool_access_states(
+        user, set(group_sources.keys()), tool_context, admin=admin
+    )
     return {
         "id": user.id,
         "username": user.username,
         "name": user.name or "unknown",
-        "is_admin": is_admin_user(user),
+        "is_admin": admin,
         "is_legacy_admin": is_legacy_admin_username(user.username),
         "branch_id": user.branch_id,
         "office_id": user.office_id,
@@ -159,6 +223,9 @@ def _serialize_user(user: User, group_rules=None, last_login_map=None) -> dict:
         "api_tool_keys": _scoped_tool_keys(user, TOOL_SCOPE_API),
         "group_tool_keys": list(group_sources.keys()),
         "group_tool_sources": group_sources,
+        # 要許可ツールごとの実効的な許可状態（画面と実挙動を必ず一致させるため
+        # サーバ側で解決して渡す）。公開ツールは含めない。
+        "tool_access": access_states,
         "last_login_at": last_login.isoformat() if last_login else None,
     }
 
@@ -177,9 +244,15 @@ def get_users():
     users = User.query.order_by(User.username).all()
     group_rules = GroupToolPermission.query.all()
     last_logins = _last_login_map()
+    tool_context = _tool_access_context()
     return jsonify({
         "users": [
-            _serialize_user(u, group_rules=group_rules, last_login_map=last_logins)
+            _serialize_user(
+                u,
+                group_rules=group_rules,
+                last_login_map=last_logins,
+                tool_context=tool_context,
+            )
             for u in users
         ]
     })
@@ -487,6 +560,12 @@ def get_user_tools(user_id):
         "api_assignable_tool_keys": sorted(_api_assignable_tool_keys()),
         "group_tool_keys": list(group_sources.keys()),
         "group_tool_sources": group_sources,
+        "tool_access": _user_tool_access_states(
+            user,
+            set(group_sources.keys()),
+            _tool_access_context(),
+            admin=is_admin_user(user),
+        ),
     })
 
 

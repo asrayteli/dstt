@@ -161,8 +161,14 @@ python -m pytest
 
 管理者ページ →「権限」タブで、対象ツールのカードに出る「ツール間APIのみ許可」を
 チェックすると付与できます。許可される経路は `app/tool_api.py` に宣言的に列挙されており、
-そこに無いエンドポイントは通りません。詳細は
-[docs/tool_api_permissions.md](docs/tool_api_permissions.md) を参照してください。
+そこに無いエンドポイントは通りません。
+
+**個別付与はグループ付与より優先されます。** 「営業所全体には社員名簿PLUSを配っているが、
+この人だけはツール間API経由に絞りたい」という設定が、グループルールを触らずにできます。
+各ツールのカードには、実際に効いている状態（通常許可／ツール間APIのみ／許可なしと、
+その根拠が個人付与かグループ付与か）がバッジで表示されます。
+
+詳細は [docs/tool_api_permissions.md](docs/tool_api_permissions.md) を参照してください。
 
 アップデート案は [docs/dstt_update_proposals.md](docs/dstt_update_proposals.md) にまとめています。
 

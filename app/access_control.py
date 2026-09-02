@@ -149,12 +149,16 @@ def _user_tool_scope_cache() -> dict | None:
 
     ツール間APIの判定は「提供元の付与」「利用側の付与」を続けて見るため、
     素直に書くと1リクエストで同じ全件取得が何度も走る（社員候補サーチは
-    入力のたびに飛ぶ）。``_group_tool_rules()`` と同じくリクエスト境界で持つ。
+    入力のたびに飛ぶ）。
+
+    キャッシュするのは **リクエスト処理中だけ**。アプリケーションコンテキストだけを
+    張って長く動くバックグラウンドジョブや一括処理では、途中で付与が書き換わった
+    ときに古い判定が残らないよう、毎回引き直す。
     """
     try:
-        from flask import has_app_context
+        from flask import has_request_context
 
-        if not has_app_context():
+        if not has_request_context():
             return None
         cache = getattr(g, _USER_TOOL_SCOPE_CACHE_ATTR, None)
         if cache is None:
@@ -360,6 +364,15 @@ def _is_tool_visible(tool_key: str) -> bool:
 
 
 def user_has_tool_access(tool_key: str, user=None) -> bool:
+    """ツール本体（UI・全API）を使ってよいか。
+
+    個別付与とグループ付与の優先順位:
+      個別付与がある場合は、それだけで決める（グループ付与は見ない）。
+      グループ付与は「支店・営業所単位でまとめて配る」もの、個別付与は
+      「その人を名指しで設定した」ものなので、後者を強い意思表示として扱う。
+      したがって個人に scope='api'（ツール間API専用許可）が付いていれば、
+      グループ付与で通常許可の対象になっていても本体は開けない。
+    """
     user = user if user is not None else current_user
     if user is None or not getattr(user, "is_authenticated", False):
         return False
@@ -369,11 +382,10 @@ def user_has_tool_access(tool_key: str, user=None) -> bool:
         return False
     if not tool_requires_permission(tool_key):
         return True
-    if tool_key in _user_granted_tool_keys(user):
-        return True
-    if tool_key in _group_granted_tool_keys(user):
-        return True
-    return False
+    individual_scope = _user_tool_scopes(user).get(tool_key)
+    if individual_scope is not None:
+        return individual_scope == TOOL_SCOPE_FULL
+    return tool_key in _group_granted_tool_keys(user)
 
 
 # ------------------------------------------------------------------
@@ -507,11 +519,85 @@ def tool_api_response_fields() -> frozenset[str] | None:
 
 
 def restrict_tool_api_rows(rows: Iterable[dict]) -> list[dict]:
-    """レスポンス行を、このリクエストで返してよい項目だけに絞る。"""
+    """レスポンス行を、このリクエストで返してよい項目だけに絞る。
+
+    許可項目が空のときは行そのものを返さない。空の dict を件数ぶん返すと
+    「該当が何件あるか」だけが漏れるため（通常はガードで弾かれて到達しない）。
+    """
     allowed = tool_api_response_fields()
     if allowed is None:
         return list(rows)
+    if not allowed:
+        return []
     return [{k: v for k, v in row.items() if k in allowed} for row in rows]
+
+
+# ------------------------------------------------------------------
+# 管理画面表示用：実効的な許可状態の説明
+# ------------------------------------------------------------------
+
+# state（実効的にできること）
+TOOL_ACCESS_STATE_FULL = "full"    # ツール本体を使える
+TOOL_ACCESS_STATE_API = "api"      # ツール間API経由の参照だけ
+TOOL_ACCESS_STATE_NONE = "none"    # 使えない
+
+# source（そうなっている理由）
+TOOL_ACCESS_SOURCE_ADMIN = "admin"            # 管理者
+TOOL_ACCESS_SOURCE_PUBLIC = "public"          # 公開ツール
+TOOL_ACCESS_SOURCE_INDIVIDUAL = "individual"  # 個別付与
+TOOL_ACCESS_SOURCE_GROUP = "group"            # グループ付与
+TOOL_ACCESS_SOURCE_HIDDEN = "hidden"          # ツール設定で非表示
+TOOL_ACCESS_SOURCE_NONE = "none"              # 付与なし
+
+
+def describe_tool_access(
+    tool_key: str,
+    *,
+    is_admin: bool,
+    individual_scope: str | None,
+    by_group: bool,
+    requires_permission: bool,
+    is_visible: bool = True,
+) -> dict:
+    """実効的な許可状態を、判定の根拠つきで返す（管理画面の表示用）。
+
+    判定の順序は :func:`user_has_tool_access` と同じ。ここだけ順序がずれると
+    画面と実挙動が食い違うため、``tests/test_tool_api_access.py`` で
+    ``user_has_tool_access()`` との一致を突き合わせている。
+    """
+    scope = normalize_tool_scope(individual_scope) if individual_scope else None
+    result = {
+        "tool_key": tool_key,
+        "state": TOOL_ACCESS_STATE_NONE,
+        "source": TOOL_ACCESS_SOURCE_NONE,
+        "individual_scope": scope,
+        "by_group": bool(by_group),
+        # 個人のAPI専用許可がグループ付与の通常許可を打ち消したか
+        "group_overridden": False,
+    }
+    if is_admin:
+        result.update(state=TOOL_ACCESS_STATE_FULL, source=TOOL_ACCESS_SOURCE_ADMIN)
+        return result
+    if not is_visible:
+        result.update(state=TOOL_ACCESS_STATE_NONE, source=TOOL_ACCESS_SOURCE_HIDDEN)
+        return result
+    if not requires_permission:
+        result.update(state=TOOL_ACCESS_STATE_FULL, source=TOOL_ACCESS_SOURCE_PUBLIC)
+        return result
+    if scope == TOOL_SCOPE_FULL:
+        result.update(state=TOOL_ACCESS_STATE_FULL, source=TOOL_ACCESS_SOURCE_INDIVIDUAL)
+        return result
+    if scope == TOOL_SCOPE_API:
+        result.update(
+            state=TOOL_ACCESS_STATE_API,
+            source=TOOL_ACCESS_SOURCE_INDIVIDUAL,
+            group_overridden=bool(by_group),
+        )
+        return result
+    if by_group:
+        result.update(state=TOOL_ACCESS_STATE_FULL, source=TOOL_ACCESS_SOURCE_GROUP)
+        return result
+    return result
 
 
 def api_grantable_tool_keys() -> set[str]:
@@ -593,6 +679,10 @@ def usernames_with_tool_access(usernames, tool_key: str, *, via_tool: str | None
     # グループ付与にこのツールの規則が無ければ、所属の解決自体が不要。
     if undecided and any(rule.tool_key == tool_key for rule in _group_tool_rules()):
         for user in undecided:
+            # 個人のツール間API専用許可はグループ付与に優先する
+            # （user_has_tool_access と同じ規則）。
+            if user.id in api_scoped_ids:
+                continue
             if tool_key in _group_granted_tool_keys(user):
                 allowed.add(user.username)
         undecided = [user for user in undecided if user.username not in allowed]
@@ -620,7 +710,12 @@ def get_accessible_nav_items(user=None) -> list[dict]:
     admin = is_admin_user(user)
     granted: set[str] | None = None
     if not admin:
-        granted = set(_user_granted_tool_keys(user)) | set(_group_granted_tool_keys(user))
+        # 個別付与がグループ付与に優先する（user_has_tool_access と同じ規則）。
+        # ツール間API専用許可はツール本体を開けないので、ここには含めない。
+        api_only = _user_api_granted_tool_keys(user)
+        granted = (
+            set(_user_granted_tool_keys(user)) | set(_group_granted_tool_keys(user))
+        ) - api_only
 
     visibility = _tool_visibility_map()
 
@@ -842,12 +937,15 @@ def set_tool_access_scopes(
 ) -> None:
     """ユーザーのツール許可を ``{tool_key: scope}`` と一致するよう同期する。
 
-    ``managed_scopes`` に含まれるスコープの既存行だけを削除対象にする。
-    たとえば ``managed_scopes=('full',)`` なら、通常許可の付け外しだけを行い、
-    ツール間API専用許可の行はそのまま残す（権限テンプレートの適用など、
-    通常許可だけを扱う経路が API 専用許可を巻き添えで消さないようにするため）。
-    ただし ``scopes`` で明示されたツールは、既存行のスコープが何であっても
-    指定どおりに揃える（(user_id, tool_key) は一意のため）。
+    ``managed_scopes`` に載っているスコープの行だけを操作する。載っていない
+    スコープの既存行は、削除も昇格/降格もしない。たとえば
+    ``managed_scopes=('full',)`` は通常許可の付け外しだけを行い、ツール間API
+    専用許可の行には一切触れない。権限テンプレートの一括適用のような
+    「まとめて配る」操作が、その人だけを名指しで絞った個別のAPI専用許可を
+    巻き添えで消したり、黙って通常許可へ格上げしたりしないようにするため。
+
+    両方のスコープを操作したい（管理画面のツール権限保存など）場合は、
+    ``managed_scopes`` を既定のまま（= 全スコープ）にする。
     """
     desired = {key: _validated_scope(scope) for key, scope in scopes.items()}
     managed = {_validated_scope(scope) for scope in managed_scopes}
@@ -857,6 +955,9 @@ def set_tool_access_scopes(
 
     changed = False
     for key, scope in desired.items():
+        if scope not in managed:
+            # 管理対象外のスコープを新規に作ることはしない。
+            continue
         row = existing.get(key)
         if row is None:
             db.session.add(
@@ -866,10 +967,15 @@ def set_tool_access_scopes(
             )
             changed = True
             continue
-        if normalize_tool_scope(row.scope) != scope:
-            row.scope = scope
-            row.granted_by = granted_by
-            changed = True
+        current_scope = normalize_tool_scope(row.scope)
+        if current_scope == scope:
+            continue
+        if current_scope not in managed:
+            # 管理対象外のスコープの行は書き換えない（意図しない格上げを防ぐ）。
+            continue
+        row.scope = scope
+        row.granted_by = granted_by
+        changed = True
 
     for key, row in existing.items():
         if key in desired:
